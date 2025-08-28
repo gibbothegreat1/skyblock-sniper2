@@ -13,6 +13,8 @@ type SetItem = {
   ownerMcuuidUrl: string | null;
   ownerPlanckeUrl: string | null;
   ownerSkyCryptUrl: string | null;
+  isExact?: boolean;
+  avgDist?: number;
   pieces: {
     helmet: { uuid: string; name: string } | null;
     chestplate: { uuid: string; name: string } | null;
@@ -29,14 +31,18 @@ type ApiResp = {
   totalPages: number;
   items: SetItem[];
   targetHex?: string;
+  tolerance?: number;
   requiresHelmet?: boolean;
   error?: string;
 };
 
+const MAX_TOL = 405;
+
 export default function SetsPage() {
   // inputs
   const [hex, setHex] = useState("");
-  const [q, setQ] = useState(""); // set keyword e.g. "wise dragon", "farm suit"
+  const [q, setQ] = useState("");
+  const [tolerance, setTolerance] = useState(0);
 
   // paging
   const [page, setPage] = useState(1);
@@ -55,11 +61,11 @@ export default function SetsPage() {
     usp.set("limit", String(limit));
     if (hex.trim()) usp.set("color", hex.trim());
     if (q.trim()) usp.set("q", q.trim());
+    if (tolerance > 0) usp.set("tolerance", String(tolerance));
     return `/api/sets?${usp.toString()}`;
-  }, [hex, q, page, limit]);
+  }, [hex, q, page, limit, tolerance]);
 
   useEffect(() => {
-    // don’t call until both fields have something
     if (!hex.trim() || !q.trim()) {
       setItems([]); setTotal(0); setTotalPages(0); setErr(null);
       return;
@@ -89,8 +95,7 @@ export default function SetsPage() {
     return () => { cancelled = true; };
   }, [apiUrl]);
 
-  // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [hex, q, limit]);
+  useEffect(() => { setPage(1); }, [hex, q, limit, tolerance]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
@@ -104,16 +109,10 @@ export default function SetsPage() {
         <p className="mt-2 text-sm text-cyan-200/80">Search complete sets by hex + set name (per owner)</p>
 
         <div className="mt-4 flex gap-3 justify-center">
-          <Link
-            href="/"
-            className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
-          >
+          <Link href="/" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">
             All Items
           </Link>
-          <Link
-            href="/favourites"
-            className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
-          >
+          <Link href="/favourites" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">
             Favourites
           </Link>
           <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">
@@ -124,38 +123,57 @@ export default function SetsPage() {
 
       <main className="max-w-6xl mx-auto px-4 pb-16">
         {/* filters */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-8">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Set name (e.g. Wise Dragon, Farm Suit)"
-            className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md"
-          />
-          <input
-            value={hex}
-            onChange={(e) => setHex(e.target.value)}
-            placeholder="Exact hex (e.g. 191919 or #191919)"
-            className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md"
-          />
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-cyan-200/80">Per page</label>
-            <select
-              value={limit}
-              onChange={(e) => setLimit(parseInt(e.target.value, 10))}
-              className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md"
-            >
-              <option value={12}>12</option>
-              <option value={24}>24</option>
-              <option value={48}>48</option>
-            </select>
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
+          <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Set name (e.g. Wise Dragon, Farm Suit)"
+              className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md"
+            />
+            <input
+              value={hex}
+              onChange={(e) => setHex(e.target.value)}
+              placeholder="Exact hex (e.g. 191919 or #191919)"
+              className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md"
+            />
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-cyan-200/80">Per page</label>
+              <select
+                value={limit}
+                onChange={(e) => setLimit(parseInt(e.target.value, 10))}
+                className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md"
+              >
+                <option value={12}>12</option>
+                <option value={24}>24</option>
+                <option value={48}>48</option>
+              </select>
+            </div>
+            <div className="flex items-end">
+              <button
+                onClick={() => setPage(1)}
+                className="w-full px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 backdrop-blur-md"
+              >
+                Search
+              </button>
+            </div>
           </div>
-          <div className="flex items-end">
-            <button
-              onClick={() => setPage(1)}
-              className="w-full px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 backdrop-blur-md"
-            >
-              Search
-            </button>
+
+          {/* tolerance */}
+          <div className="lg:col-span-1 rounded-2xl bg-white/10 ring-1 ring-white/10 p-3 backdrop-blur-md">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-cyan-200/80">Nearby tolerance</span>
+              <code className="text-[10px] text-cyan-200/90">tol: {tolerance}</code>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={MAX_TOL}
+              step={1}
+              value={tolerance}
+              onChange={(e) => setTolerance(parseInt(e.target.value, 10))}
+              className="w-full accent-cyan-300"
+            />
           </div>
         </div>
 
@@ -194,7 +212,18 @@ export default function SetsPage() {
                     {/* set header */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold truncate text-slate-50">{it.setLabel}</h3>
+                        <h3 className="font-semibold truncate text-slate-50">
+                          {it.setLabel}
+                          {it.isExact ? (
+                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/25">
+                              exact
+                            </span>
+                          ) : typeof it.avgDist === "number" ? (
+                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 text-slate-100 ring-1 ring-white/15">
+                              avg {it.avgDist}
+                            </span>
+                          ) : null}
+                        </h3>
                         {it.rarity && (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">
                             {it.rarity}
@@ -234,7 +263,7 @@ export default function SetsPage() {
                         </div>
                       </div>
 
-                      {/* pieces table */}
+                      {/* pieces grid */}
                       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                         {it.pieces.helmet && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
