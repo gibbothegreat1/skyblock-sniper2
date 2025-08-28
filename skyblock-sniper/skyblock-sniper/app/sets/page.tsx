@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+type Piece = { uuid: string; name: string; hex?: string | null } | null;
+
 type SetItem = {
   setLabel: string;
   color: string;
@@ -16,10 +18,10 @@ type SetItem = {
   isExact?: boolean;
   avgDist?: number;
   pieces: {
-    helmet: { uuid: string; name: string } | null;
-    chestplate: { uuid: string; name: string } | null;
-    leggings: { uuid: string; name: string } | null;
-    boots: { uuid: string; name: string } | null;
+    helmet: Piece;
+    chestplate: Piece;
+    leggings: Piece;
+    boots: Piece;
   };
 };
 
@@ -37,6 +39,20 @@ type ApiResp = {
 };
 
 const MAX_TOL = 405;
+
+// normalizes #RGB or RGB to #rrggbb (lowercase)
+function formatHex(h?: string | null) {
+  if (!h) return null;
+  const clean = h.trim().replace(/^#/, "");
+  if (!clean) return null;
+  if (clean.length === 3) {
+    const c = clean.split("").map((ch) => ch + ch).join("");
+    return `#${c.toLowerCase()}`;
+  }
+  if (clean.length === 6) return `#${clean.toLowerCase()}`;
+  // fallback: still prefix with #, lowercased
+  return `#${clean.toLowerCase()}`;
+}
 
 export default function SetsPage() {
   // inputs
@@ -269,24 +285,44 @@ export default function SetsPage() {
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Helmet</div>
                             <div className="font-medium truncate">{it.pieces.helmet.name}</div>
+                            {formatHex(it.pieces.helmet.hex) && (
+                              <code className="block text-[11px] opacity-75 mt-0.5">
+                                {formatHex(it.pieces.helmet.hex)}
+                              </code>
+                            )}
                           </div>
                         )}
                         {it.pieces.chestplate && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Chestplate</div>
                             <div className="font-medium truncate">{it.pieces.chestplate.name}</div>
+                            {formatHex(it.pieces.chestplate.hex) && (
+                              <code className="block text-[11px] opacity-75 mt-0.5">
+                                {formatHex(it.pieces.chestplate.hex)}
+                              </code>
+                            )}
                           </div>
                         )}
                         {it.pieces.leggings && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Leggings</div>
                             <div className="font-medium truncate">{it.pieces.leggings.name}</div>
+                            {formatHex(it.pieces.leggings.hex) && (
+                              <code className="block text-[11px] opacity-75 mt-0.5">
+                                {formatHex(it.pieces.leggings.hex)}
+                              </code>
+                            )}
                           </div>
                         )}
                         {it.pieces.boots && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Boots</div>
                             <div className="font-medium truncate">{it.pieces.boots.name}</div>
+                            {formatHex(it.pieces.boots.hex) && (
+                              <code className="block text-[11px] opacity-75 mt-0.5">
+                                {formatHex(it.pieces.boots.hex)}
+                              </code>
+                            )}
                           </div>
                         )}
                       </div>
