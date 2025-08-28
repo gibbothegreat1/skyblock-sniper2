@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+type PieceEntry = { uuid: string; name: string; color: string };
 type SetItem = {
   setLabel: string;
-  color: string;
+  color: string; // target hex
   rarity: string | null;
   ownerUuid: string | null;
   ownerUsername: string | null;
@@ -16,10 +17,10 @@ type SetItem = {
   isExact?: boolean;
   avgDist?: number;
   pieces: {
-    helmet: { uuid: string; name: string } | null;
-    chestplate: { uuid: string; name: string } | null;
-    leggings: { uuid: string; name: string } | null;
-    boots: { uuid: string; name: string } | null;
+    helmet: PieceEntry | null;
+    chestplate: PieceEntry | null;
+    leggings: PieceEntry | null;
+    boots: PieceEntry | null;
   };
 };
 
@@ -32,6 +33,7 @@ type ApiResp = {
   items: SetItem[];
   targetHex?: string;
   tolerance?: number;
+  exactGroup?: boolean;
   requiresHelmet?: boolean;
   error?: string;
 };
@@ -43,6 +45,7 @@ export default function SetsPage() {
   const [hex, setHex] = useState("");
   const [q, setQ] = useState("");
   const [tolerance, setTolerance] = useState(0);
+  const [exactGroup, setExactGroup] = useState(false);
 
   // paging
   const [page, setPage] = useState(1);
@@ -62,8 +65,9 @@ export default function SetsPage() {
     if (hex.trim()) usp.set("color", hex.trim());
     if (q.trim()) usp.set("q", q.trim());
     if (tolerance > 0) usp.set("tolerance", String(tolerance));
+    if (exactGroup) usp.set("exactGroup", "1");
     return `/api/sets?${usp.toString()}`;
-  }, [hex, q, page, limit, tolerance]);
+  }, [hex, q, page, limit, tolerance, exactGroup]);
 
   useEffect(() => {
     if (!hex.trim() || !q.trim()) {
@@ -95,7 +99,7 @@ export default function SetsPage() {
     return () => { cancelled = true; };
   }, [apiUrl]);
 
-  useEffect(() => { setPage(1); }, [hex, q, limit, tolerance]);
+  useEffect(() => { setPage(1); }, [hex, q, limit, tolerance, exactGroup]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
@@ -159,7 +163,7 @@ export default function SetsPage() {
             </div>
           </div>
 
-          {/* tolerance */}
+          {/* tolerance + exactGroup */}
           <div className="lg:col-span-1 rounded-2xl bg-white/10 ring-1 ring-white/10 p-3 backdrop-blur-md">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-cyan-200/80">Nearby tolerance</span>
@@ -174,6 +178,14 @@ export default function SetsPage() {
               onChange={(e) => setTolerance(parseInt(e.target.value, 10))}
               className="w-full accent-cyan-300"
             />
+            <label className="mt-2 flex items-center gap-2 text-xs text-cyan-100/90">
+              <input
+                type="checkbox"
+                checked={exactGroup}
+                onChange={(e) => setExactGroup(e.target.checked)}
+              />
+              Exact group hexes only
+            </label>
           </div>
         </div>
 
@@ -263,30 +275,34 @@ export default function SetsPage() {
                         </div>
                       </div>
 
-                      {/* pieces grid */}
+                      {/* pieces grid (now shows hex under each piece name) */}
                       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                         {it.pieces.helmet && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Helmet</div>
                             <div className="font-medium truncate">{it.pieces.helmet.name}</div>
+                            <code className="text-[11px] opacity-90">{it.pieces.helmet.color}</code>
                           </div>
                         )}
                         {it.pieces.chestplate && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Chestplate</div>
                             <div className="font-medium truncate">{it.pieces.chestplate.name}</div>
+                            <code className="text-[11px] opacity-90">{it.pieces.chestplate.color}</code>
                           </div>
                         )}
                         {it.pieces.leggings && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Leggings</div>
                             <div className="font-medium truncate">{it.pieces.leggings.name}</div>
+                            <code className="text-[11px] opacity-90">{it.pieces.leggings.color}</code>
                           </div>
                         )}
                         {it.pieces.boots && (
                           <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                             <div className="text-xs opacity-80">Boots</div>
                             <div className="font-medium truncate">{it.pieces.boots.name}</div>
+                            <code className="text-[11px] opacity-90">{it.pieces.boots.color}</code>
                           </div>
                         )}
                       </div>
