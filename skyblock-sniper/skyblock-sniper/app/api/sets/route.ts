@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
 /**
- * Types that match the front-end.
+ * Output types (align with the frontend)
  */
 type PieceOut = { uuid: string; name: string; hex?: string | null } | null;
 
 type SetItemOut = {
   setLabel: string;
-  color: string;
+  color: string; // normalized hex for the set's representative color if available
   rarity: string | null;
   ownerUuid: string | null;
   ownerUsername: string | null;
@@ -32,28 +32,26 @@ type ApiResp = {
   total: number;
   totalPages: number;
   items: SetItemOut[];
-  targetHex?: string;
+  targetHex?: string;        // must be string | undefined, not null
   tolerance?: number;
   requiresHelmet?: boolean;
   error?: string;
 };
 
 /**
- * Minimal interface for whatever your data layer returns.
- * Replace this with your actual schema or adapters.
+ * Minimal raw data interfaces you can adapt to your DB layer.
+ * If your schema differs, just adjust the mapper calls below.
  */
 type RawPiece = {
   uuid: string;
   name: string;
-  // if your store already has a hex, great; otherwise you can compute it
-  hex?: string | null;
+  hex?: string | null;   // preferred per-item hex if available
   color?: string | null; // fallback field name some stores use
-};
+} | null;
 
 type RawSet = {
   setLabel: string;
-  // aggregate/representative color for the set
-  color: string;
+  color: string; // set representative color (can be hex)
   rarity: string | null;
   ownerUuid: string | null;
   ownerUsername: string | null;
@@ -64,16 +62,16 @@ type RawSet = {
   isExact?: boolean;
   avgDist?: number;
   pieces: {
-    helmet?: RawPiece | null;
-    chestplate?: RawPiece | null;
-    leggings?: RawPiece | null;
-    boots?: RawPiece | null;
+    helmet?: RawPiece;
+    chestplate?: RawPiece;
+    leggings?: RawPiece;
+    boots?: RawPiece;
   };
 };
 
 /**
- * Plug your real data fetch here.
- * It should apply filters: color (target hex), q (set name), tolerance, page, limit.
+ * Replace this with your actual DB/query implementation.
+ * It should honor color (hex), q (set name), tolerance, page, and limit.
  */
 async function fetchSetsFromYourStore(params: {
   color?: string;
@@ -82,25 +80,25 @@ async function fetchSetsFromYourStore(params: {
   page: number;
   limit: number;
 }): Promise<{ total: number; items: RawSet[] }> {
-  // TODO: Replace with your actual DB/query implementation.
-  // This stub returns nothing; it's here to show how mapping works.
+  // TODO: hook up your real data access.
   return { total: 0, items: [] };
 }
 
-// normalize to #rrggbb lowercase
+/** Normalize input hex to "#rrggbb" (lowercase). Returns null if not parseable. */
 function normalizeHex(h?: string | null): string | null {
   if (!h) return null;
   const clean = h.trim().replace(/^#/, "");
   if (!clean) return null;
   if (clean.length === 3) {
-    const c = clean.split("").map((ch) => ch + ch).join("");
-    return `#${c.toLowerCase()}`;
+    const x = clean.split("").map((ch) => ch + ch).join("");
+    return `#${x.toLowerCase()}`;
   }
   if (clean.length === 6) return `#${clean.toLowerCase()}`;
-  return `#${clean.toLowerCase()}`;
+  return `#${clean.toLowerCase()}`; // permissive fallback
 }
 
-function mapPiece(p?: RawPiece | null): PieceOut {
+/** Map a single raw piece to the output, including normalized hex. */
+function mapPiece(p?: RawPiece): PieceOut {
   if (!p) return null;
   return {
     uuid: p.uuid,
@@ -112,14 +110,16 @@ function mapPiece(p?: RawPiece | null): PieceOut {
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
+
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
     const limit = Math.max(1, Math.min(100, parseInt(searchParams.get("limit") || "24", 10)));
 
-    const rawColor = searchParams.get("color") || undefined;
-    const q = searchParams.get("q") || undefined;
+    const rawColor = searchParams.get("color") || undefined; // incoming hex (may be "191919" or "#191919")
+    const q = searchParams.get("q") || undefined;            // set name query
     const tolStr = searchParams.get("tolerance");
     const tolerance = tolStr ? Math.max(0, parseInt(tolStr, 10)) : undefined;
 
+    // If required inputs missing, return an empty OK payload
     if (!rawColor || !q) {
       const empty: ApiResp = {
         ok: true,
@@ -128,7 +128,7 @@ export async function GET(req: Request) {
         total: 0,
         totalPages: 0,
         items: [],
-        targetHex: normalizeHex(rawColor || ""),
+        targetHex: normalizeHex(rawColor || "") || undefined, // coalesce null → undefined to satisfy type
         tolerance,
       };
       return NextResponse.json(empty, { status: 200 });
@@ -159,10 +159,10 @@ export async function GET(req: Request) {
       isExact: s.isExact,
       avgDist: s.avgDist,
       pieces: {
-        helmet: mapPiece(s.pieces?.helmet ?? null),
-        chestplate: mapPiece(s.pieces?.chestplate ?? null),
-        leggings: mapPiece(s.pieces?.leggings ?? null),
-        boots: mapPiece(s.pieces?.boots ?? null),
+        helmet: mapPiece(s.pieces?.helmet),
+        chestplate: mapPiece(s.pieces?.chestplate),
+        leggings: mapPiece(s.pieces?.leggings),
+        boots: mapPiece(s.pieces?.boots),
       },
     }));
 
@@ -173,7 +173,7 @@ export async function GET(req: Request) {
       total,
       totalPages,
       items: mapped,
-      targetHex: targetHex || undefined,
+      targetHex: targetHex || undefined, // string | undefined
       tolerance,
     };
 
