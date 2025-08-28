@@ -115,12 +115,13 @@ async function resolveUsername(uuidMaybeDashed?: string | null): Promise<string 
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
-    const qRaw = (searchParams.get("q") || "").trim();          // set keywords, e.g. "wise dragon" or "farm suit"
-    const color = (searchParams.get("color") || "").trim();     // target hex
-    const tolerance = Math.max(0, Math.min(405, parseInt(searchParams.get("tolerance") || "0", 10) || 0));
-    const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "24", 10) || 24, 1), 100);
-    const page  = Math.max(parseInt(searchParams.get("page") || "1", 10) || 1, 1);
-    const offset = (page - 1) * limit;
+    const qRaw       = (searchParams.get("q") || "").trim();          // set keywords
+    const color      = (searchParams.get("color") || "").trim();      // target hex
+    const tolerance  = Math.max(0, Math.min(405, parseInt(searchParams.get("tolerance") || "0", 10) || 0));
+    const exactGroup = (searchParams.get("exactGroup") || "0") === "1"; // new: require all pieces share same hex
+    const limit      = Math.min(Math.max(parseInt(searchParams.get("limit") || "24", 10) || 24, 1), 100);
+    const page       = Math.max(parseInt(searchParams.get("page") || "1", 10) || 1, 1);
+    const offset     = (page - 1) * limit;
 
     const hex = normalizeHex(color);
     if (!hex) {
@@ -136,7 +137,7 @@ export async function GET(req: Request) {
     let rows: Row[] = [];
 
     if (tolerance === 0) {
-      // exact hex (fast SQL)
+      // Exact hex (fast path)
       const hexNoHash = hex.slice(1).toUpperCase();
       rows = db.prepare(
         `SELECT id, uuid, name, color, rarity, extra
@@ -146,7 +147,7 @@ export async function GET(req: Request) {
          ORDER BY name`
       ).all(hexNoHash, like) as Row[];
     } else {
-      // allow near colors: fetch by name only, then filter in JS by nibble-distance
+      // Tolerance > 0: pull by name first, filter in memory by nibble distance
       rows = db.prepare(
         `SELECT id, uuid, name, color, rarity, extra
          FROM items
@@ -155,7 +156,7 @@ export async function GET(req: Request) {
       ).all(like) as Row[];
     }
 
-    // Bucket by owner + set label + target hex; track per-piece distance
+    // Bucket by owner + set label + target hex; track piece hex & distance
     type Bucket = {
       ownerUuid: string | null;
       ownerUsername: string | null;
@@ -165,15 +166,16 @@ export async function GET(req: Request) {
       ownerSkyCryptUrl: string | null;
       setLabel: string;
       color: string; // target hex
-      pieces: Partial<Record<PieceKind, Row>>;
-      pieceDist: Partial<Record<PieceKind, number>>; // nibble distance to target
+      pieces: Partial<Record<PieceKind, Row & { normHex: string }>>;
+      pieceDist: Partial<Record<PieceKind, number>>;
       rarity?: string | null;
     };
+
     const buckets = new Map<string, Bucket>();
     const setLabel = `${titleCase(qRaw)} Set`;
 
     for (const r of rows) {
-      // Must have owner to form a set
+      // owner
       let ownerUuid: string | null = null;
       let rarity: string | null = r.rarity ?? null;
       try {
@@ -182,31 +184,29 @@ export async function GET(req: Request) {
       } catch {}
       if (!ownerUuid) continue;
 
-      // Must map to a known piece
       const piece = detectPiece(r.name || "");
       if (!piece) continue;
 
-      // Color rules
       const itemHex = normalizeHex(r.color || "");
       if (!itemHex) continue;
 
       const dist = nibbleDistance(itemHex, hex);
       if (tolerance === 0) {
-        if (dist !== 0) continue; // exact only in this branch anyway
+        if (dist !== 0) continue;
       } else {
-        if (dist > tolerance) continue; // outside tolerance, drop
+        if (dist > tolerance) continue;
       }
 
       const key = `${ownerUuid.toLowerCase()}::${setLabel}::${hex.slice(1)}`;
       if (!buckets.has(key)) {
-        const ownerUuidFlat = ownerUuid.replace(/-/g, "");
+        const flat = ownerUuid.replace(/-/g, "");
         buckets.set(key, {
           ownerUuid,
           ownerUsername: null,
           ownerAvatarUrl: avatarUrl(ownerUuid, 24),
-          ownerMcuuidUrl: `https://mcuuid.net/?q=${ownerUuidFlat}`,
+          ownerMcuuidUrl: `https://mcuuid.net/?q=${flat}`,
           ownerPlanckeUrl: null,
-          ownerSkyCryptUrl: `https://sky.shiiyu.moe/stats/${ownerUuidFlat}`,
+          ownerSkyCryptUrl: `https://sky.shiiyu.moe/stats/${flat}`,
           setLabel,
           color: hex,
           pieces: {},
@@ -216,28 +216,29 @@ export async function GET(req: Request) {
       }
       const g = buckets.get(key)!;
       if (!g.pieces[piece]) {
-        g.pieces[piece] = r;
+        g.pieces[piece] = { ...r, normHex: itemHex };
         g.pieceDist[piece] = dist;
         if (!g.rarity && r.rarity) g.rarity = r.rarity;
       }
     }
 
-    // Keep only complete sets; compute exact/avg/max distance
+    // Keep only complete sets; enforce exactGroup if requested; compute distances
     type Ready = Bucket & { isExact: boolean; avgDist: number; maxDist: number };
     const completed: Ready[] = [];
     for (const g of buckets.values()) {
-      const hasChest = !!g.pieces.chestplate;
-      const hasLegs  = !!g.pieces.leggings;
-      const hasBoots = !!g.pieces.boots;
-      const hasHelm  = !!g.pieces.helmet;
-      const complete = wantHelmet ? (hasHelm && hasChest && hasLegs && hasBoots)
-                                  : (hasChest && hasLegs && hasBoots);
-      if (!complete) continue;
-
-      // aggregate distance
       const req: PieceKind[] = wantHelmet
         ? ["helmet", "chestplate", "leggings", "boots"]
         : ["chestplate", "leggings", "boots"];
+
+      const haveAll = req.every(pk => !!g.pieces[pk]);
+      if (!haveAll) continue;
+
+      // Enforce: if exactGroup requested, all piece hexes must be identical
+      if (exactGroup) {
+        const hx = new Set(req.map(pk => g.pieces[pk]!.normHex));
+        if (hx.size > 1) continue;
+      }
+
       const dists = req.map(pk => g.pieceDist[pk] ?? 9999);
       const maxDist = Math.max(...dists);
       const avgDist = dists.reduce((a, b) => a + b, 0) / dists.length;
@@ -246,7 +247,7 @@ export async function GET(req: Request) {
       completed.push({ ...g, isExact, avgDist, maxDist });
     }
 
-    // Resolve usernames (cap)
+    // Resolve usernames
     const owners = Array.from(new Set(completed.map(g => g.ownerUuid!).filter(Boolean))).slice(0, 50);
     const nameMap = new Map<string, string | null>();
     await Promise.all(owners.map(async (u) => nameMap.set(u, await resolveUsername(u))));
@@ -257,7 +258,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // Sort: exact first, then avgDist asc, then owner name/uuid
+    // Sort: exact first, then avgDist, then owner
     completed.sort((a, b) => {
       if (a.isExact !== b.isExact) return a.isExact ? -1 : 1;
       if (a.avgDist !== b.avgDist) return a.avgDist - b.avgDist;
@@ -281,10 +282,10 @@ export async function GET(req: Request) {
       isExact: g.isExact,
       avgDist: Math.round(g.avgDist),
       pieces: {
-        helmet: g.pieces.helmet ? { uuid: g.pieces.helmet.uuid, name: g.pieces.helmet.name } : null,
-        chestplate: g.pieces.chestplate ? { uuid: g.pieces.chestplate.uuid, name: g.pieces.chestplate.name } : null,
-        leggings: g.pieces.leggings ? { uuid: g.pieces.leggings.uuid, name: g.pieces.leggings.name } : null,
-        boots: g.pieces.boots ? { uuid: g.pieces.boots.uuid, name: g.pieces.boots.name } : null,
+        helmet: g.pieces.helmet ? { uuid: g.pieces.helmet.uuid, name: g.pieces.helmet.name, color: g.pieces.helmet.normHex } : null,
+        chestplate: g.pieces.chestplate ? { uuid: g.pieces.chestplate.uuid, name: g.pieces.chestplate.name, color: g.pieces.chestplate.normHex } : null,
+        leggings: g.pieces.leggings ? { uuid: g.pieces.leggings.uuid, name: g.pieces.leggings.name, color: g.pieces.leggings.normHex } : null,
+        boots: g.pieces.boots ? { uuid: g.pieces.boots.uuid, name: g.pieces.boots.name, color: g.pieces.boots.normHex } : null,
       },
     }));
 
@@ -297,6 +298,7 @@ export async function GET(req: Request) {
       items: slice,
       targetHex: hex,
       tolerance,
+      exactGroup,
       requiresHelmet: wantHelmet,
     });
   } catch (err: any) {
