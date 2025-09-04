@@ -46,10 +46,15 @@ const LS_SETS = "gibbo-fav-sets";
 const ARMOUR_DIR = "/images/armor";     // {piece}_base.png, {piece}_tint.png
 const ICONS_DIR  = "/images/set-icons"; // {superior|wise|unstable|strong|young|old|protector|holy}.png
 
+/* --------- UI sizing ---------- */
+const PIECE_SIZE = 56;              // chest/legs/boots preview size
+const ICON_SCALE = 0.90;            // helmet icon is slightly smaller than pieces
+
 /* --------- tint tuning ---------- */
-const TINT_OPACITY = 0.60;      // strength of colour tint
-const SHADOW_OPACITY = 0.16;    // strengthens creases
-const HIGHLIGHT_OPACITY = 0.16; // sheen
+const TINT_OPACITY = 0.90;      // strong colour tint
+const COLOR_BLEND_OPACITY = 0.35; // adds hue/sat richness above the base
+const SHADOW_OPACITY = 0.12;    // gentle creases
+const HIGHLIGHT_OPACITY = 0.12; // sheen
 
 /* -------------------- Utils -------------------- */
 function normHex(h?: string | null) {
@@ -104,20 +109,15 @@ function inferDragonKey(setLabel: string): string | null {
   const m = setLabel.toLowerCase().match(/\b(superior|wise|unstable|strong|young|old|protector|holy)\b/);
   return m ? m[1] : null;
 }
-/** soften a loud hex by blending toward white */
-function softenHex(hex: string, amount = 0.15) {
-  const n = hex.trim().replace(/^#/, "");
-  if (!/^[0-9a-fA-F]{6}$/.test(n)) return hex;
-  const r = parseInt(n.slice(0,2),16), g = parseInt(n.slice(2,4),16), b = parseInt(n.slice(4,6),16);
-  const mix = (c: number) => Math.round(c + (255 - c) * amount);
-  const rr = mix(r), gg = mix(g), bb = mix(b);
-  return "#" + [rr,gg,bb].map(v => v.toString(16).padStart(2,"0")).join("");
-}
 
 /* -------------------- Armour UI -------------------- */
-/** Helmet slot: show set icon; if missing, fall back to helmet_base.png */
-function HelmetIconSlot({ setLabel, size = 56 }: { setLabel: string; size?: number }) {
+/** Helmet slot: show set icon; if missing, fall back to helmet_base.png.
+ *  We size it slightly smaller than the other pieces (ICON_SCALE).
+ */
+function HelmetIconSlot({ setLabel }: { setLabel: string }) {
   const key = inferDragonKey(setLabel);
+  const size = Math.round(PIECE_SIZE * ICON_SCALE);
+
   if (!key) {
     return (
       <img
@@ -141,17 +141,18 @@ function HelmetIconSlot({ setLabel, size = 56 }: { setLabel: string; size?: numb
 
 /**
  * Layer order (top → bottom visual result):
- *   4) masked highlight (screen)
- *   3) BASE IMAGE on top (mix-blend: luminosity)  ← keeps crisp detail while colour shows
+ *   5) masked highlight (screen)
+ *   4) colour reinforcement ABOVE base: 'color' blend (adds hue/sat richness)
+ *   3) BASE IMAGE on top (normal) — crisp details preserved
  *   2) masked soft shadow (multiply)
- *   1) masked colour TINT (under)
+ *   1) masked colour TINT (under, multiply)
  *
  * Also auto-handles boots__base.png.
  */
 function TintedArmour({
   piece,
   hex,
-  size = 56,
+  size = PIECE_SIZE,
   title,
 }: {
   piece: "helmet" | "chestplate" | "leggings" | "boots";
@@ -176,7 +177,7 @@ function TintedArmour({
     maskPosition: "center",
   };
 
-  const tintHex = hex ? softenHex(hex, 0.15) : null;
+  const tintHex = hex || null;
 
   return (
     <div className="relative" title={title || piece} style={{ width: size, height: size }}>
@@ -202,16 +203,26 @@ function TintedArmour({
         }}
       />
 
-      {/* 3) BASE on top — take luminance from base, colour from layers below */}
+      {/* 3) BASE on top — normal blend to preserve crisp pixels */}
       <img
         src={baseSrc}
         alt={`${piece} base`}
         className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-        style={{ mixBlendMode: "luminosity", opacity: 1 }}
         onError={() => { if (baseSrc !== baseAlt) setBaseSrc(baseAlt); }}
       />
 
-      {/* 4) Highlight (screen), masked */}
+      {/* 4) Colour reinforcement ABOVE the base: hue/sat only */}
+      <div
+        className="absolute inset-0"
+        style={{
+          ...maskStyles,
+          backgroundColor: tintHex || "transparent",
+          mixBlendMode: "color",
+          opacity: COLOR_BLEND_OPACITY,
+        }}
+      />
+
+      {/* 5) Highlight (screen), masked */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -403,7 +414,7 @@ export default function SetsPage() {
           </div>
         </div>
 
-        {/* Hint */}
+        {/* Prompt / Error */}
         {!hex.trim() || !q.trim() ? (
           <div className="p-4 rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl text-center text-sm text-slate-200/90">
             Enter a <strong>set name</strong> and an <strong>exact hex</strong> to find complete sets owned by the same player.
@@ -411,7 +422,6 @@ export default function SetsPage() {
           </div>
         ) : null}
 
-        {/* Error */}
         {err && (
           <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">
             {err}
@@ -424,7 +434,6 @@ export default function SetsPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {items.map((it, idx) => {
                 const favKey = makeSetKey(it);
-                const fav = isFavSet(favKey);
                 const displayHex = computeSetDisplayHex(it) || normHex(it.color) || "#888888";
 
                 return (
@@ -518,14 +527,7 @@ export default function SetsPage() {
                       {/* right: vertical preview + favourite */}
                       <div className="flex flex-col items-center gap-3">
                         <VerticalSetPreview s={it} />
-                        <button
-                          onClick={() => toggleFavSet(it)}
-                          className={`text-2xl leading-none ${fav ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
-                          title={fav ? "Remove set from favourites" : "Add set to favourites"}
-                          aria-label={fav ? "Unfavourite set" : "Favourite set"}
-                        >
-                          ★
-                        </button>
+                        <FavButton item={it} />
                       </div>
                     </div>
                   </div>
@@ -534,30 +536,78 @@ export default function SetsPage() {
             </div>
 
             {/* pagination */}
-            {totalPages > 1 && (
-              <div className="mt-8 flex items-center justify-center gap-3">
-                <button
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md"
-                >
-                  Prev
-                </button>
-                <span className="text-sm text-slate-200/90">Page {page} / {totalPages} &nbsp;•&nbsp; {total} sets</span>
-                <button
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md"
-                >
-                  Next
-                </button>
-              </div>
-            )}
+            <Pagination totalPages={totalPages} page={page} setPage={setPage} total={total} />
           </>
         )}
 
         {loading && <div className="mt-6 text-center text-sm text-slate-300/80">Loading…</div>}
       </main>
     </div>
+  );
+}
+
+/* -------------------- Small UI helpers -------------------- */
+
+function Pagination({ totalPages, page, setPage, total }:{
+  totalPages: number; page: number; setPage: (fn: (p:number)=>number|number)=>void; total: number;
+}) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="mt-8 flex items-center justify-center gap-3">
+      <button
+        disabled={page <= 1}
+        onClick={() => setPage((p: number) => Math.max(1, p - 1))}
+        className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md"
+      >
+        Prev
+      </button>
+      <span className="text-sm text-slate-200/90">Page {page} / {totalPages} &nbsp;•&nbsp; {total} sets</span>
+      <button
+        disabled={page >= totalPages}
+        onClick={() => setPage((p: number) => Math.min(totalPages, p + 1))}
+        className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md"
+      >
+        Next
+      </button>
+    </div>
+  );
+}
+
+function FavButton({ item }: { item: SetItem }) {
+  const favKey = makeSetKey(item);
+  const [fav, setFav] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem(LS_SETS);
+      const arr: any[] = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) && arr.some((x) => x?.favKey === favKey);
+    } catch { return false; }
+  });
+
+  const toggle = () => {
+    setFav((prev) => {
+      try {
+        const raw = localStorage.getItem(LS_SETS);
+        const arr: any[] = raw ? JSON.parse(raw) : [];
+        let next: any[];
+        if (prev) {
+          next = arr.filter((x) => x?.favKey !== favKey);
+        } else {
+          next = [...arr, { ...item, favKey }];
+        }
+        localStorage.setItem(LS_SETS, JSON.stringify(next));
+      } catch {}
+      return !prev;
+    });
+  };
+
+  return (
+    <button
+      onClick={toggle}
+      className={`text-2xl leading-none ${fav ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
+      title={fav ? "Remove set from favourites" : "Add set to favourites"}
+      aria-label={fav ? "Unfavourite set" : "Favourite set"}
+    >
+      ★
+    </button>
   );
 }
