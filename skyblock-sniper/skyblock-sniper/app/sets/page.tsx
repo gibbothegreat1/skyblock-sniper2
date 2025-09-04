@@ -49,17 +49,14 @@ const LS_SETS = "gibbo-fav-sets";
 const ARMOUR_DIR = "/images/armor";
 const ICONS_DIR = "/images/set-icons";
 
-const PIECE_SIZE = 56;       // preview size for chest/legs/boots
-const ICON_SCALE = 0.9;      // helmet icon fraction of piece size
+const PIECE_SIZE = 56;  // preview size for chest/legs/boots
+const ICON_SCALE = 0.9; // helmet icon fraction of piece size
 
 // Canvas recolor tuning
-// vGain lifts dark pixels slightly so very dark shades still show color.
-// gamma < 1 brightens midtones a touch; > 1 darkens midtones.
-const V_GAIN = 0.08;
-const GAMMA = 0.95;
+const V_GAIN = 0.06;  // lift deep shadows a touch (0..~0.15)
+const GAMMA = 0.95;   // <1 brightens midtones slightly
 
-// Optional extra sheen (0..1). 0 = off.
-const HIGHLIGHT_OPACITY = 0.12;
+const HIGHLIGHT_OPACITY = 0.12; // extra sheen (0..1)
 
 /* =========================
    Color helpers
@@ -158,11 +155,9 @@ function inferDragonKey(setLabel: string): string | null {
    Canvas recolor
    ========================= */
 /**
- * Recolors a grayscale/tinted PNG (the *_tint.png) to the target hex:
- * - hue + saturation from target hex
- * - value/brightness from source pixel (after gamma + small gain)
- * - alpha preserved
- * Returns a data URL you can <img> with.
+ * Recolors a grayscale/tinted PNG (the *_tint.png) to the target hex.
+ * - For COLOURED targets: hue+sat from target, value from source brightness (scaled by target value a bit).
+ * - For GRAY targets (sat≈0): outRGB = targetRGB * sourceBrightness (component-wise), so it never washes to white.
  */
 async function recolorSpriteToHex(
   tintUrl: string,
@@ -183,24 +178,38 @@ async function recolorSpriteToHex(
   const buf = data.data;
 
   const [tr, tg, tb] = hexToRgb(hex);
-  const [th, ts] = rgbToHsv(tr, tg, tb); // take hue & sat from target; v will come from source luminance
+  const [th, ts, tv] = rgbToHsv(tr, tg, tb); // tv ∈ [0..1]
+
+  const grayTarget = ts < 0.001; // achromatic
 
   for (let i = 0; i < buf.length; i += 4) {
     const r = buf[i], g = buf[i+1], b = buf[i+2], a = buf[i+3];
-    if (a === 0) continue; // fully transparent
-    // Use the input pixel value as brightness (works for grayscale)
-    // Normalize to 0..1, add a small gain to avoid crushed blacks
-    let v = Math.max(0, Math.min(1, (Math.max(r, g, b) / 255)));
-    v = Math.pow(v, GAMMA) + V_GAIN;
+    if (a === 0) continue; // transparent
+
+    // Source brightness from the tint image (works for grayscale art)
+    let v = Math.max(r, g, b) / 255;
+    v = Math.pow(v, GAMMA) + V_GAIN; // gamma + small gain for deep shadows
     if (v > 1) v = 1;
 
-    const [nr, ng, nb] = hsvToRgb(th, ts, v);
-    buf[i] = nr; buf[i+1] = ng; buf[i+2] = nb; // keep alpha as-is
+    let nr: number, ng: number, nb: number;
+
+    if (grayTarget) {
+      // Shade toward the exact gray: component-wise multiply by brightness.
+      nr = Math.round(tr * v);
+      ng = Math.round(tg * v);
+      nb = Math.round(tb * v);
+    } else {
+      // Keep target hue/sat, but scale value by both source v and target tv a bit.
+      const vOut = Math.max(0, Math.min(1, v * (0.5 + tv * 0.5))); // blend between v and tv
+      [nr, ng, nb] = hsvToRgb(th, ts, vOut);
+    }
+
+    buf[i] = nr; buf[i+1] = ng; buf[i+2] = nb; // keep alpha
   }
 
   ctx.putImageData(data, 0, 0);
 
-  // optional masked highlight for a little sheen
+  // Optional masked highlight for a little sheen
   if (HIGHLIGHT_OPACITY > 0) {
     ctx.globalCompositeOperation = "screen";
     const grad = ctx.createLinearGradient(0, 0, 0, h);
@@ -224,10 +233,10 @@ function loadImage(src: string) {
   });
 }
 
-/* A tiny cache so repeated colors render instantly */
+/* Cache per (url|hex|size) to avoid recomputation */
 const recolorCache = new Map<string, string>();
 async function getRecolored(url: string, hex: string, size: number) {
-  const key = `${url}|${hex}|${size}`;
+  const key = `${url}|${hex}|${size}|v2`; // bump key if algo changes
   const cached = recolorCache.get(key);
   if (cached) return cached;
   const dataUrl = await recolorSpriteToHex(url, hex, size);
@@ -263,11 +272,7 @@ function HelmetIconSlot({ setLabel }: { setLabel: string }) {
   );
 }
 
-/**
- * Canvas-based recolor component.
- * - Draws recolored *_tint.png (per-pixel) to a data URL
- * - Composites base on top for crisp outlines
- */
+/** Canvas-based recolor component (recolored tint UNDER, base ON TOP). */
 function RecoloredArmour({
   piece,
   hex,
@@ -343,7 +348,7 @@ function VerticalSetPreview({ s }: { s: SetItem }) {
    Page
    ========================= */
 export default function SetsPage() {
-  // filters/inputs
+  // inputs
   const [hex, setHex] = useState("");
   const [q, setQ] = useState("");
   const [tolerance, setTolerance] = useState(0);
@@ -353,14 +358,14 @@ export default function SetsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(24);
 
-  // data state
+  // data
   const [items, setItems] = useState<SetItem[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // favourites
+  // favourites (store full objects for your /favourites page)
   const [favKeys, setFavKeys] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem(LS_SETS);
@@ -416,13 +421,16 @@ export default function SetsPage() {
     const key = makeSetKey(s);
     setFavKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
       try {
-        // store full objects for your existing favourites page to read
         const raw = localStorage.getItem(LS_SETS);
         const arr: any[] = raw ? JSON.parse(raw) : [];
-        const filtered = arr.filter((x) => x?.favKey !== key);
-        if (next.has(key)) filtered.push({ ...s, favKey: key });
+        let filtered = arr.filter((x) => x?.favKey !== key);
+        if (!next.has(key)) {
+          filtered = [...filtered, { ...s, favKey: key }];
+          next.add(key);
+        } else {
+          next.delete(key);
+        }
         localStorage.setItem(LS_SETS, JSON.stringify(filtered));
       } catch {}
       return next;
@@ -504,7 +512,7 @@ export default function SetsPage() {
           </div>
         </div>
 
-        {/* Prompts / Errors */}
+        {/* Prompt / Error */}
         {!hex.trim() || !q.trim() ? (
           <div className="p-4 rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl text-center text-sm text-slate-200/90">
             Enter a <strong>set name</strong> and an <strong>exact hex</strong> to find complete sets owned by the same player.
@@ -525,7 +533,7 @@ export default function SetsPage() {
               {items.map((it, idx) => {
                 const favKey = makeSetKey(it);
                 const displayHex = computeSetDisplayHex(it) || normHex(it.color) || "#888888";
-                const favbed = favKeys.has(favKey);
+                const isFav = favKeys.has(favKey);
 
                 return (
                   <div key={idx} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
@@ -620,9 +628,9 @@ export default function SetsPage() {
                         <VerticalSetPreview s={it} />
                         <button
                           onClick={() => toggleFav(it)}
-                          className={`text-2xl leading-none ${favbed ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
-                          title={favbed ? "Remove set from favourites" : "Add set to favourites"}
-                          aria-label={favbed ? "Unfavourite set" : "Favourite set"}
+                          className={`text-2xl leading-none ${isFav ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
+                          title={isFav ? "Remove set from favourites" : "Add set to favourites"}
+                          aria-label={isFav ? "Unfavourite set" : "Favourite set"}
                         >
                           ★
                         </button>
