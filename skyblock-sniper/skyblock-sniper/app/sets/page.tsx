@@ -42,9 +42,14 @@ type ApiResp = {
 const MAX_TOL = 405;
 const LS_SETS = "gibbo-fav-sets";
 
-/* --------- where your assets live (adjust if needed) ---------- */
+/* --------- static asset locations ---------- */
 const ARMOUR_DIR = "/images/armor";     // {piece}_base.png, {piece}_tint.png
 const ICONS_DIR  = "/images/set-icons"; // {superior|wise|unstable|strong|young|old|protector|holy}.png
+
+/* --------- tint tuning ---------- */
+const TINT_OPACITY = 0.60;      // strength of colour tint
+const SHADOW_OPACITY = 0.16;    // strengthens creases
+const HIGHLIGHT_OPACITY = 0.16; // sheen
 
 /* -------------------- Utils -------------------- */
 function normHex(h?: string | null) {
@@ -99,6 +104,15 @@ function inferDragonKey(setLabel: string): string | null {
   const m = setLabel.toLowerCase().match(/\b(superior|wise|unstable|strong|young|old|protector|holy)\b/);
   return m ? m[1] : null;
 }
+/** soften a loud hex by blending toward white */
+function softenHex(hex: string, amount = 0.15) {
+  const n = hex.trim().replace(/^#/, "");
+  if (!/^[0-9a-fA-F]{6}$/.test(n)) return hex;
+  const r = parseInt(n.slice(0,2),16), g = parseInt(n.slice(2,4),16), b = parseInt(n.slice(4,6),16);
+  const mix = (c: number) => Math.round(c + (255 - c) * amount);
+  const rr = mix(r), gg = mix(g), bb = mix(b);
+  return "#" + [rr,gg,bb].map(v => v.toString(16).padStart(2,"0")).join("");
+}
 
 /* -------------------- Armour UI -------------------- */
 /** Helmet slot: show set icon; if missing, fall back to helmet_base.png */
@@ -126,13 +140,13 @@ function HelmetIconSlot({ setLabel, size = 56 }: { setLabel: string; size?: numb
 }
 
 /**
- * Tinted armour using two files:
- *  1) Base image (no colour)
- *  2) Masked colour layer (masked by *_tint.png)
- *  3) Optional screen highlight (also masked)
+ * Layer order (top → bottom visual result):
+ *   4) masked highlight (screen)
+ *   3) BASE IMAGE on top (mix-blend: luminosity)  ← keeps crisp detail while colour shows
+ *   2) masked soft shadow (multiply)
+ *   1) masked colour TINT (under)
  *
- * The **mask** ensures only the armour pixels get coloured (not the whole square).
- * Also auto-handles the boots__base.png filename quirk.
+ * Also auto-handles boots__base.png.
  */
 function TintedArmour({
   piece,
@@ -146,7 +160,7 @@ function TintedArmour({
   title?: string;
 }) {
   const baseDefault = `${ARMOUR_DIR}/${piece}_base.png`;
-  const baseAlt     = `${ARMOUR_DIR}/${piece}__base.png`; // for e.g. boots__base.png
+  const baseAlt     = `${ARMOUR_DIR}/${piece}__base.png`; // in case of boots__base.png
   const tintSrc     = `${ARMOUR_DIR}/${piece}_tint.png`;
 
   const [baseSrc, setBaseSrc] = useState(baseDefault);
@@ -162,34 +176,49 @@ function TintedArmour({
     maskPosition: "center",
   };
 
+  const tintHex = hex ? softenHex(hex, 0.15) : null;
+
   return (
     <div className="relative" title={title || piece} style={{ width: size, height: size }}>
-      {/* 1) Base image (grayscale/no colour) */}
-      <img
-        src={baseSrc}
-        alt={`${piece} base`}
-        className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-        onError={() => { if (baseSrc !== baseAlt) setBaseSrc(baseAlt); }}
-      />
-
-      {/* 2) Masked colour layer (only tints the non-transparent pixels of *_tint.png) */}
+      {/* 1) TINT (under) */}
       <div
         className="absolute inset-0"
         style={{
           ...maskStyles,
-          backgroundColor: hex || "transparent",
+          backgroundColor: tintHex || "transparent",
           mixBlendMode: "multiply",
+          opacity: tintHex ? TINT_OPACITY : 0,
         }}
       />
 
-      {/* 3) Soft highlight (also masked) */}
+      {/* 2) Soft shadow (multiply) */}
+      <div
+        className="absolute inset-0"
+        style={{
+          ...maskStyles,
+          backgroundColor: "#000",
+          mixBlendMode: "multiply",
+          opacity: SHADOW_OPACITY,
+        }}
+      />
+
+      {/* 3) BASE on top — take luminance from base, colour from layers below */}
+      <img
+        src={baseSrc}
+        alt={`${piece} base`}
+        className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+        style={{ mixBlendMode: "luminosity", opacity: 1 }}
+        onError={() => { if (baseSrc !== baseAlt) setBaseSrc(baseAlt); }}
+      />
+
+      {/* 4) Highlight (screen), masked */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           ...maskStyles,
           background: "linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0))",
           mixBlendMode: "screen",
-          opacity: 0.35,
+          opacity: HIGHLIGHT_OPACITY,
         }}
       />
     </div>
