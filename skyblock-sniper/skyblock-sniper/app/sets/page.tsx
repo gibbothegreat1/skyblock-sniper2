@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type PieceEntry = { uuid: string; name: string; color: string };
-type SetItem = {
+export type SetItem = {
   setLabel: string;
   color: string; // target hex
   rarity: string | null;
@@ -39,6 +39,22 @@ type ApiResp = {
 };
 
 const MAX_TOL = 405;
+const LS_SETS = "gibbo-fav-sets";
+
+// deterministic key for a set favourite
+function makeSetKey(s: SetItem) {
+  return [
+    s.ownerUuid || "?",
+    s.setLabel || "?",
+    s.color || "?",
+    s.pieces.helmet?.uuid || "",
+    s.pieces.chestplate?.uuid || "",
+    s.pieces.leggings?.uuid || "",
+    s.pieces.boots?.uuid || "",
+  ].join("|");
+}
+
+type FavSet = SetItem & { favKey: string };
 
 export default function SetsPage() {
   // inputs
@@ -57,6 +73,32 @@ export default function SetsPage() {
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // favourite sets (local)
+  const [favSets, setFavSets] = useState<FavSet[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_SETS);
+      const arr = raw ? JSON.parse(raw) : [];
+      const safe: FavSet[] = Array.isArray(arr) ? arr.filter(Boolean) : [];
+      setFavSets(safe);
+    } catch {
+      setFavSets([]);
+    }
+  }, []);
+
+  const isFavSet = (favKey: string) => favSets.some((s) => s.favKey === favKey);
+  const toggleFavSet = (set: SetItem) => {
+    const favKey = makeSetKey(set);
+    setFavSets((prev) => {
+      const has = prev.some((s) => s.favKey === favKey);
+      const next = has
+        ? prev.filter((s) => s.favKey !== favKey)
+        : [...prev, { ...set, favKey }];
+      try { localStorage.setItem(LS_SETS, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const apiUrl = useMemo(() => {
     const usp = new URLSearchParams();
@@ -208,108 +250,122 @@ export default function SetsPage() {
         {!err && items.length > 0 && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {items.map((it, idx) => (
-                <div key={idx} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
-                  <div className="flex items-start gap-3">
-                    {/* color swatch */}
-                    <div className="flex flex-col items-center gap-1">
-                      <div
-                        className="w-10 h-10 rounded-xl ring-1 ring-white/20"
-                        style={{ backgroundColor: it.color }}
-                        title={it.color}
-                      />
-                      <code className="text-[11px] text-slate-200/90">{it.color}</code>
-                    </div>
-
-                    {/* set header */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold truncate text-slate-50">
-                          {it.setLabel}
-                          {it.isExact ? (
-                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/25">
-                              exact
-                            </span>
-                          ) : typeof it.avgDist === "number" ? (
-                            <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 text-slate-100 ring-1 ring-white/15">
-                              avg {it.avgDist}
-                            </span>
-                          ) : null}
-                        </h3>
-                        {it.rarity && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">
-                            {it.rarity}
-                          </span>
-                        )}
+              {items.map((it, idx) => {
+                const favKey = makeSetKey(it);
+                const fav = isFavSet(favKey);
+                return (
+                  <div key={idx} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
+                    <div className="flex items-start gap-3">
+                      {/* color swatch */}
+                      <div className="flex flex-col items-center gap-1">
+                        <div
+                          className="w-10 h-10 rounded-xl ring-1 ring-white/20"
+                          style={{ backgroundColor: it.color }}
+                          title={it.color}
+                        />
+                        <code className="text-[11px] text-slate-200/90">{it.color}</code>
                       </div>
 
-                      {/* owner + links */}
-                      <div className="mt-1 flex items-center gap-2 text-sm">
-                        {it.ownerAvatarUrl && (
-                          <img
-                            src={it.ownerAvatarUrl}
-                            width={20}
-                            height={20}
-                            alt="avatar"
-                            className="rounded-md ring-1 ring-white/20"
-                          />
-                        )}
-                        {it.ownerUsername ? (
-                          <span className="text-slate-100">{it.ownerUsername}</span>
-                        ) : it.ownerUuid ? (
-                          <span className="text-slate-300/80">{it.ownerUuid.slice(0, 8)}…</span>
-                        ) : (
-                          <span className="text-slate-300/60">No owner</span>
-                        )}
+                      {/* set header */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold truncate text-slate-50">
+                            {it.setLabel}
+                            {it.isExact ? (
+                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/25">
+                                exact
+                              </span>
+                            ) : typeof it.avgDist === "number" ? (
+                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 text-slate-100 ring-1 ring-white/15">
+                                avg {it.avgDist}
+                              </span>
+                            ) : null}
+                          </h3>
+                          {it.rarity && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">
+                              {it.rarity}
+                            </span>
+                          )}
+                        </div>
 
-                        <div className="ml-auto flex items-center gap-2">
-                          {it.ownerPlanckeUrl && (
-                            <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={it.ownerPlanckeUrl} target="_blank" rel="noreferrer">Plancke</a>
+                        {/* owner + links */}
+                        <div className="mt-1 flex items-center gap-2 text-sm">
+                          {it.ownerAvatarUrl && (
+                            <img
+                              src={it.ownerAvatarUrl}
+                              width={20}
+                              height={20}
+                              alt="avatar"
+                              className="rounded-md ring-1 ring-white/20"
+                            />
                           )}
-                          {it.ownerSkyCryptUrl && (
-                            <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={it.ownerSkyCryptUrl} target="_blank" rel="noreferrer">SkyCrypt</a>
+                          {it.ownerUsername ? (
+                            <span className="text-slate-100">{it.ownerUsername}</span>
+                          ) : it.ownerUuid ? (
+                            <span className="text-slate-300/80">{it.ownerUuid.slice(0, 8)}…</span>
+                          ) : (
+                            <span className="text-slate-300/60">No owner</span>
                           )}
-                          {it.ownerMcuuidUrl && (
-                            <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={it.ownerMcuuidUrl} target="_blank" rel="noreferrer">MCUUID</a>
+
+                          <div className="ml-auto flex items-center gap-2">
+                            {it.ownerPlanckeUrl && (
+                              <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={it.ownerPlanckeUrl} target="_blank" rel="noreferrer">Plancke</a>
+                            )}
+                            {it.ownerSkyCryptUrl && (
+                              <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={it.ownerSkyCryptUrl} target="_blank" rel="noreferrer">SkyCrypt</a>
+                            )}
+                            {it.ownerMcuuidUrl && (
+                              <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={it.ownerMcuuidUrl} target="_blank" rel="noreferrer">MCUUID</a>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* pieces grid (with per-piece hex) */}
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                          {it.pieces.helmet && (
+                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                              <div className="text-xs opacity-80">Helmet</div>
+                              <div className="font-medium truncate">{it.pieces.helmet.name}</div>
+                              <code className="text-[11px] opacity-90">{it.pieces.helmet.color}</code>
+                            </div>
+                          )}
+                          {it.pieces.chestplate && (
+                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                              <div className="text-xs opacity-80">Chestplate</div>
+                              <div className="font-medium truncate">{it.pieces.chestplate.name}</div>
+                              <code className="text-[11px] opacity-90">{it.pieces.chestplate.color}</code>
+                            </div>
+                          )}
+                          {it.pieces.leggings && (
+                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                              <div className="text-xs opacity-80">Leggings</div>
+                              <div className="font-medium truncate">{it.pieces.leggings.name}</div>
+                              <code className="text-[11px] opacity-90">{it.pieces.leggings.color}</code>
+                            </div>
+                          )}
+                          {it.pieces.boots && (
+                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                              <div className="text-xs opacity-80">Boots</div>
+                              <div className="font-medium truncate">{it.pieces.boots.name}</div>
+                              <code className="text-[11px] opacity-90">{it.pieces.boots.color}</code>
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      {/* pieces grid (now shows hex under each piece name) */}
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                        {it.pieces.helmet && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
-                            <div className="text-xs opacity-80">Helmet</div>
-                            <div className="font-medium truncate">{it.pieces.helmet.name}</div>
-                            <code className="text-[11px] opacity-90">{it.pieces.helmet.color}</code>
-                          </div>
-                        )}
-                        {it.pieces.chestplate && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
-                            <div className="text-xs opacity-80">Chestplate</div>
-                            <div className="font-medium truncate">{it.pieces.chestplate.name}</div>
-                            <code className="text-[11px] opacity-90">{it.pieces.chestplate.color}</code>
-                          </div>
-                        )}
-                        {it.pieces.leggings && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
-                            <div className="text-xs opacity-80">Leggings</div>
-                            <div className="font-medium truncate">{it.pieces.leggings.name}</div>
-                            <code className="text-[11px] opacity-90">{it.pieces.leggings.color}</code>
-                          </div>
-                        )}
-                        {it.pieces.boots && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
-                            <div className="text-xs opacity-80">Boots</div>
-                            <div className="font-medium truncate">{it.pieces.boots.name}</div>
-                            <code className="text-[11px] opacity-90">{it.pieces.boots.color}</code>
-                          </div>
-                        )}
-                      </div>
+                      {/* favourite toggle */}
+                      <button
+                        onClick={() => toggleFavSet(it)}
+                        className={`shrink-0 text-2xl leading-none ${fav ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
+                        title={fav ? "Remove set from favourites" : "Add set to favourites"}
+                        aria-label={fav ? "Unfavourite set" : "Favourite set"}
+                      >
+                        ★
+                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* pagination */}
