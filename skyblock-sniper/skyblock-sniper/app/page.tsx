@@ -33,7 +33,8 @@ type ApiResp = {
 };
 
 /* -------------------- Consts -------------------- */
-const LS_KEY = "gibbo-favs";
+const LS_ITEMS = "gibbo-favs";
+const LS_SETS = "gibbo-fav-sets";
 const MAX_TOL = 405;
 
 /* -------------------- Page -------------------- */
@@ -56,25 +57,36 @@ export default function HomePage() {
   const [err, setErr] = useState<string | null>(null);
 
   // Favourites
-  const [favs, setFavs] = useState<string[]>([]);
+  const [favItemUuids, setFavItemUuids] = useState<string[]>([]);
+  const [favSetCount, setFavSetCount] = useState<number>(0);
+
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(LS_KEY);
+      const raw = localStorage.getItem(LS_ITEMS);
       const arr = raw ? JSON.parse(raw) : [];
-      setFavs(Array.isArray(arr) ? arr.filter(Boolean) : []);
+      setFavItemUuids(Array.isArray(arr) ? arr.filter(Boolean) : []);
     } catch {
-      setFavs([]);
+      setFavItemUuids([]);
+    }
+    try {
+      const raw2 = localStorage.getItem(LS_SETS);
+      const arr2 = raw2 ? JSON.parse(raw2) : [];
+      setFavSetCount(Array.isArray(arr2) ? arr2.filter(Boolean).length : 0);
+    } catch {
+      setFavSetCount(0);
     }
   }, []);
+
   const toggleFav = useCallback((uuid: string) => {
-    setFavs((prev) => {
+    setFavItemUuids((prev) => {
       const has = prev.includes(uuid);
       const next = has ? prev.filter((u) => u !== uuid) : [...prev, uuid];
-      try { localStorage.setItem(LS_KEY, JSON.stringify(next)); } catch {}
+      try { localStorage.setItem(LS_ITEMS, JSON.stringify(next)); } catch {}
       return next;
     });
   }, []);
-  const isFav = (uuid: string) => favs.includes(uuid);
+  const isFav = (uuid: string) => favItemUuids.includes(uuid);
+  const favTotal = favItemUuids.length + favSetCount;
 
   // Build API URL
   const apiUrl = useMemo(() => {
@@ -138,24 +150,24 @@ export default function HomePage() {
         <p className="mt-2 text-sm text-cyan-200/80">gibbo is the greatest (sniper) lel</p>
 
         {/* Tabs (links) */}
-<div className="mt-6 flex gap-3 justify-center">
-  <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">
-    All
-  </span>
-  <Link
-    href="/favourites"
-    className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
-    title={favs.length ? `${favs.length} favourites` : "Favourites"}
-  >
-    Favourites {favs.length ? `(${favs.length})` : ""}
-  </Link>
-  <Link
-    href="/sets"
-    className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
-  >
-    Sets
-  </Link>
-</div>
+        <div className="mt-6 flex gap-3 justify-center">
+          <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">
+            All
+          </span>
+          <Link
+            href="/favourites"
+            className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
+            title={favTotal ? `${favTotal} favourites` : "Favourites"}
+          >
+            Favourites {favTotal ? `(${favTotal})` : ""}
+          </Link>
+          <Link
+            href="/sets"
+            className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
+          >
+            Sets
+          </Link>
+        </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-4 pb-16">
@@ -177,7 +189,6 @@ export default function HomePage() {
             <select
               value={piece}
               onChange={(e) => setPiece(e.target.value as any)}
-              // piece dropdown text explicitly black
               className="px-3 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md"
             >
               <option value="all">All pieces</option>
@@ -201,7 +212,7 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Tolerance slider (no extra description line) */}
+          {/* Tolerance slider */}
           <div className="lg:col-span-1 rounded-2xl bg-white/10 ring-1 ring-white/10 p-3 backdrop-blur-md">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-cyan-200/80">Nearby tolerance</span>
@@ -230,7 +241,7 @@ export default function HomePage() {
         {!err && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {items.map((it) => {
-              const fav = isFav(it.uuid);
+              const fav = favItemUuids.includes(it.uuid);
               return (
                 <div
                   key={it.uuid}
@@ -361,6 +372,3 @@ export default function HomePage() {
     </div>
   );
 }
-
-
-
