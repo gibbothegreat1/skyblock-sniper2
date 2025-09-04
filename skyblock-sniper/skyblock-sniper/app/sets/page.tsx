@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
+/* -------------------- Types -------------------- */
 type PieceEntry = { uuid: string; name: string; color: string };
 export type SetItem = {
   setLabel: string;
-  // API "color" was the searched/target hex — we will compute our own displayHex below
-  color: string;
+  color: string; // API's target/search hex; we'll compute our own displayHex
   rarity: string | null;
   ownerUuid: string | null;
   ownerUsername: string | null;
@@ -42,9 +42,7 @@ type ApiResp = {
 const MAX_TOL = 405;
 const LS_SETS = "gibbo-fav-sets";
 
-type FavSet = SetItem & { favKey: string };
-
-/* ---------------- util: hex handling ---------------- */
+/* -------------------- Utils -------------------- */
 function normHex(h?: string | null) {
   if (!h) return null;
   const x = h.trim().replace(/^#/, "");
@@ -53,10 +51,11 @@ function normHex(h?: string | null) {
 function hexToRgb(h?: string | null): [number, number, number] | null {
   const n = normHex(h);
   if (!n) return null;
-  const r = parseInt(n.slice(1, 3), 16);
-  const g = parseInt(n.slice(3, 5), 16);
-  const b = parseInt(n.slice(5, 7), 16);
-  return [r, g, b];
+  return [
+    parseInt(n.slice(1, 3), 16),
+    parseInt(n.slice(3, 5), 16),
+    parseInt(n.slice(5, 7), 16),
+  ];
 }
 function rgbToHex(r: number, g: number, b: number) {
   return (
@@ -66,26 +65,20 @@ function rgbToHex(r: number, g: number, b: number) {
       .join("")
   );
 }
-/** Representative set hex = average of available piece hexes (helmet/chest/legs/boots) */
+/** Average the available piece colours to get a representative display hex */
 function computeSetDisplayHex(s: SetItem): string | null {
   const cols = [
     s.pieces.helmet?.color,
     s.pieces.chestplate?.color,
     s.pieces.leggings?.color,
     s.pieces.boots?.color,
-  ]
-    .map(hexToRgb)
-    .filter(Boolean) as [number, number, number][];
+  ].map(hexToRgb).filter(Boolean) as [number, number, number][];
   if (!cols.length) return null;
-  const sum = cols.reduce(
-    (acc, [r, g, b]) => [acc[0] + r, acc[1] + g, acc[2] + b],
-    [0, 0, 0] as [number, number, number]
-  );
+  const sum = cols.reduce((acc, [r, g, b]) => [acc[0] + r, acc[1] + g, acc[2] + b], [0, 0, 0] as [number, number, number]);
   const avg: [number, number, number] = [sum[0] / cols.length, sum[1] / cols.length, sum[2] / cols.length];
   return rgbToHex(avg[0], avg[1], avg[2]);
 }
 
-/* --------------- util: set key + icon mapping --------------- */
 function makeSetKey(s: SetItem) {
   return [
     s.ownerUuid || "?",
@@ -101,56 +94,66 @@ function inferDragonKey(setLabel: string): string | null {
   return m ? m[1] : null;
 }
 
-/* ---------------- components: tint rendering ---------------- */
-/**
- * TintedPiece renders the white PNG with a colour *tint* (not full recolour),
- * preserving PNG details via blend layers.
- *
- * Structure:
- *  - base image (white PNG)
- *  - colour overlay with mix-blend:multiply (applies tint)
- *  - soft highlight overlay with mix-blend:screen (keeps brightness)
- */
-function TintedPiece({
+/* -------------------- Armour UI -------------------- */
+function HelmetIconSlot({ setLabel, size = 56 }: { setLabel: string; size?: number }) {
+  const key = inferDragonKey(setLabel);
+  if (!key) return null;
+  const src = `/armour/icons/${key}.png`;
+  return (
+    <img
+      src={src}
+      alt={`${key} icon`}
+      className="mx-auto opacity-90"
+      style={{ width: size, height: size, objectFit: "contain" }}
+      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+    />
+  );
+}
+
+/** Renders a single armour piece using *_base.png + *_tint.png with a multiply tint overlay (preserves detail). */
+function TintedArmour({
   piece,
   hex,
+  size = 56,
   title,
-  size = 48,
 }: {
   piece: "helmet" | "chestplate" | "leggings" | "boots";
   hex: string | null;
-  title?: string;
   size?: number;
+  title?: string;
 }) {
-  const src = `/images/armor/${piece}.png`;
+  const base = `/armour/${piece}_base.png`;
+  const tint = `/armour/${piece}_tint.png`;
   return (
-    <div
-      className="relative"
-      style={{ width: size, height: size }}
-      title={title || piece}
-    >
-      {/* Base white PNG */}
+    <div className="relative" title={title || piece} style={{ width: size, height: size }}>
+      {/* Base (no colour) */}
       <img
-        src={src}
-        alt={piece}
+        src={base}
+        alt={`${piece} base`}
         className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-        style={{ filter: "grayscale(1) brightness(1)" }}
       />
-      {/* Colour overlay (tint) */}
+      {/* Tint overlay applied ONLY to the *_tint.png image */}
+      {hex && (
+        <div
+          className="absolute inset-0"
+          style={{
+            backgroundColor: hex,
+            mixBlendMode: "multiply",
+          }}
+        >
+          <img
+            src={tint}
+            alt={`${piece} tint`}
+            className="w-full h-full object-contain select-none pointer-events-none"
+            style={{ display: "block" }}
+          />
+        </div>
+      )}
+      {/* Optional gentle highlight to avoid looking muddy */}
       <div
-        className="absolute inset-0"
+        className="absolute inset-0 pointer-events-none"
         style={{
-          backgroundColor: hex || "transparent",
-          mixBlendMode: "multiply",
-          opacity: hex ? 0.9 : 0, // if no hex, hide
-        }}
-      />
-      {/* Soft highlight to keep a bit of shine */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.15), rgba(255,255,255,0.00))",
+          background: "linear-gradient(180deg, rgba(255,255,255,.15), rgba(255,255,255,0))",
           mixBlendMode: "screen",
           opacity: 0.35,
         }}
@@ -159,53 +162,26 @@ function TintedPiece({
   );
 }
 
-/** Helmet slot shows the **set icon** instead of a helmet PNG */
-function HelmetIconSlot({ setLabel, size = 48 }: { setLabel: string; size?: number }) {
-  const key = inferDragonKey(setLabel);
-  if (!key) {
-    // fallback: show an untinted helmet png if no icon mapping
-    return <TintedPiece piece="helmet" hex={null} size={size} title="Helmet" />;
-  }
-  const src = `/images/set-icons/${key}.png`;
-  return (
-    <div
-      className="relative flex items-center justify-center"
-      style={{ width: size, height: size }}
-      title={`${key} set`}
-    >
-      <img
-        src={src}
-        alt={`${key} icon`}
-        className="max-w-full max-h-full object-contain opacity-90"
-        onError={(e) => {
-          // hide if missing
-          (e.currentTarget as HTMLImageElement).style.display = "none";
-        }}
-      />
-    </div>
-  );
-}
-
-/** Vertical armour stack: Helmet(icon) → Chest → Legs → Boots */
+/** Vertical stack: Helmet (icon in this slot) → Chest → Legs → Boots */
 function VerticalSetPreview({ s }: { s: SetItem }) {
-  const h = normHex(s.pieces.helmet?.color);
   const c = normHex(s.pieces.chestplate?.color);
   const l = normHex(s.pieces.leggings?.color);
   const b = normHex(s.pieces.boots?.color);
-
   return (
     <div className="flex flex-col items-center gap-2">
       <HelmetIconSlot setLabel={s.setLabel} />
-      <TintedPiece piece="chestplate" hex={c} title="Chestplate" />
-      <TintedPiece piece="leggings" hex={l} title="Leggings" />
-      <TintedPiece piece="boots" hex={b} title="Boots" />
+      <TintedArmour piece="chestplate" hex={c} title="Chestplate" />
+      <TintedArmour piece="leggings"  hex={l} title="Leggings" />
+      <TintedArmour piece="boots"      hex={b} title="Boots" />
     </div>
   );
 }
 
-/* ---------------- page ---------------- */
+/* -------------------- Page -------------------- */
+type FavSet = SetItem & { favKey: string };
+
 export default function SetsPage() {
-  // inputs
+  // filters/inputs
   const [hex, setHex] = useState("");
   const [q, setQ] = useState("");
   const [tolerance, setTolerance] = useState(0);
@@ -215,38 +191,36 @@ export default function SetsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(24);
 
-  // data
+  // data state
   const [items, setItems] = useState<SetItem[]>([]);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // favourite sets (local)
+  // favourites (sets)
   const [favSets, setFavSets] = useState<FavSet[]>([]);
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_SETS);
       const arr = raw ? JSON.parse(raw) : [];
-      const safe: FavSet[] = Array.isArray(arr) ? arr.filter(Boolean) : [];
-      setFavSets(safe);
+      setFavSets(Array.isArray(arr) ? arr.filter(Boolean) : []);
     } catch {
       setFavSets([]);
     }
   }, []);
-  const isFavSet = (favKey: string) => favSets.some((s) => s.favKey === favKey);
-  const toggleFavSet = (set: SetItem) => {
-    const favKey = makeSetKey(set);
+  const isFavSet = (key: string) => favSets.some((s) => s.favKey === key);
+  const toggleFavSet = (s: SetItem) => {
+    const favKey = makeSetKey(s);
     setFavSets((prev) => {
-      const has = prev.some((s) => s.favKey === favKey);
-      const next = has ? prev.filter((s) => s.favKey !== favKey) : [...prev, { ...set, favKey }];
-      try {
-        localStorage.setItem(LS_SETS, JSON.stringify(next));
-      } catch {}
+      const has = prev.some((x) => x.favKey === favKey);
+      const next = has ? prev.filter((x) => x.favKey !== favKey) : [...prev, { ...s, favKey }];
+      try { localStorage.setItem(LS_SETS, JSON.stringify(next)); } catch {}
       return next;
     });
   };
 
+  // build API url
   const apiUrl = useMemo(() => {
     const usp = new URLSearchParams();
     usp.set("page", String(page));
@@ -258,6 +232,7 @@ export default function SetsPage() {
     return `/api/sets?${usp.toString()}`;
   }, [hex, q, page, limit, tolerance, exactGroup]);
 
+  // fetch
   useEffect(() => {
     if (!hex.trim() || !q.trim()) {
       setItems([]); setTotal(0); setTotalPages(0); setErr(null);
@@ -293,10 +268,7 @@ export default function SetsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
       <header className="py-10 text-center">
-        <h1
-          className="text-4xl font-extrabold tracking-tight drop-shadow"
-          style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}
-        >
+        <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
           Gibbo&apos;s Exo&apos;s — Sets
         </h1>
         <p className="mt-2 text-sm text-cyan-200/80">Search complete sets by hex + set name (per owner)</p>
@@ -309,7 +281,7 @@ export default function SetsPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 pb-16">
-        {/* filters */}
+        {/* Filters */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
           <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
             <input
@@ -368,7 +340,7 @@ export default function SetsPage() {
           </div>
         </div>
 
-        {/* hint */}
+        {/* Hint */}
         {!hex.trim() || !q.trim() ? (
           <div className="p-4 rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl text-center text-sm text-slate-200/90">
             Enter a <strong>set name</strong> and an <strong>exact hex</strong> to find complete sets owned by the same player.
@@ -376,22 +348,20 @@ export default function SetsPage() {
           </div>
         ) : null}
 
-        {/* error */}
+        {/* Error */}
         {err && (
           <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">
             {err}
           </div>
         )}
 
-        {/* results */}
+        {/* Results */}
         {!err && items.length > 0 && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {items.map((it, idx) => {
                 const favKey = makeSetKey(it);
                 const fav = isFavSet(favKey);
-
-                // compute a representative hex from piece colours (shown in swatch & code)
                 const displayHex = computeSetDisplayHex(it) || normHex(it.color) || "#888888";
 
                 return (
@@ -407,7 +377,7 @@ export default function SetsPage() {
                         <code className="text-[11px] text-slate-200/90">{displayHex}</code>
                       </div>
 
-                      {/* middle: text info */}
+                      {/* middle: info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold truncate text-slate-50">
@@ -449,7 +419,7 @@ export default function SetsPage() {
                           </div>
                         </div>
 
-                        {/* piece names + hexes */}
+                        {/* piece info (names + hexes) */}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                           {it.pieces.chestplate && (
                             <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
@@ -482,7 +452,7 @@ export default function SetsPage() {
                         </div>
                       </div>
 
-                      {/* right: vertical visual preview + favourite toggle */}
+                      {/* right: vertical preview + favourite */}
                       <div className="flex flex-col items-center gap-3">
                         <VerticalSetPreview s={it} />
                         <button
