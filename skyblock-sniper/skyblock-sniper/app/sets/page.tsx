@@ -6,7 +6,8 @@ import Link from "next/link";
 type PieceEntry = { uuid: string; name: string; color: string };
 export type SetItem = {
   setLabel: string;
-  color: string; // target hex
+  // API "color" was the searched/target hex — we will compute our own displayHex below
+  color: string;
   rarity: string | null;
   ownerUuid: string | null;
   ownerUsername: string | null;
@@ -43,73 +44,150 @@ const LS_SETS = "gibbo-fav-sets";
 
 type FavSet = SetItem & { favKey: string };
 
-// ---------- helpers ----------
+/* ---------------- util: hex handling ---------------- */
+function normHex(h?: string | null) {
+  if (!h) return null;
+  const x = h.trim().replace(/^#/, "");
+  return /^[0-9a-fA-F]{6}$/.test(x) ? `#${x.toLowerCase()}` : null;
+}
+function hexToRgb(h?: string | null): [number, number, number] | null {
+  const n = normHex(h);
+  if (!n) return null;
+  const r = parseInt(n.slice(1, 3), 16);
+  const g = parseInt(n.slice(3, 5), 16);
+  const b = parseInt(n.slice(5, 7), 16);
+  return [r, g, b];
+}
+function rgbToHex(r: number, g: number, b: number) {
+  return (
+    "#" +
+    [r, g, b]
+      .map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0"))
+      .join("")
+  );
+}
+/** Representative set hex = average of available piece hexes (helmet/chest/legs/boots) */
+function computeSetDisplayHex(s: SetItem): string | null {
+  const cols = [
+    s.pieces.helmet?.color,
+    s.pieces.chestplate?.color,
+    s.pieces.leggings?.color,
+    s.pieces.boots?.color,
+  ]
+    .map(hexToRgb)
+    .filter(Boolean) as [number, number, number][];
+  if (!cols.length) return null;
+  const sum = cols.reduce(
+    (acc, [r, g, b]) => [acc[0] + r, acc[1] + g, acc[2] + b],
+    [0, 0, 0] as [number, number, number]
+  );
+  const avg: [number, number, number] = [sum[0] / cols.length, sum[1] / cols.length, sum[2] / cols.length];
+  return rgbToHex(avg[0], avg[1], avg[2]);
+}
+
+/* --------------- util: set key + icon mapping --------------- */
 function makeSetKey(s: SetItem) {
   return [
     s.ownerUuid || "?",
     s.setLabel || "?",
-    s.color || "?",
     s.pieces.helmet?.uuid || "",
     s.pieces.chestplate?.uuid || "",
     s.pieces.leggings?.uuid || "",
     s.pieces.boots?.uuid || "",
   ].join("|");
 }
-
-function normHex(h?: string | null) {
-  if (!h) return null;
-  const x = h.trim().replace(/^#/, "");
-  return /^([0-9a-fA-F]{6})$/.test(x) ? `#${x.toLowerCase()}` : null;
-}
-
 function inferDragonKey(setLabel: string): string | null {
-  // tries to pull "wise", "superior", etc from strings like "Wise Dragon"
   const m = setLabel.toLowerCase().match(/\b(superior|wise|unstable|strong|young|old|protector|holy)\b/);
   return m ? m[1] : null;
 }
 
-// ---------- tiny UI components ----------
-function ArmorPiece({ hex, piece }: { hex: string | null; piece: "helmet"|"chestplate"|"leggings"|"boots" }) {
-  const url = `/images/armor/${piece}.png`;
-  // If no hex, show a subtle placeholder box
-  if (!hex) {
-    return <div className="w-12 h-12 rounded-lg bg-white/5 ring-1 ring-white/10" title="No piece" />;
-  }
+/* ---------------- components: tint rendering ---------------- */
+/**
+ * TintedPiece renders the white PNG with a colour *tint* (not full recolour),
+ * preserving PNG details via blend layers.
+ *
+ * Structure:
+ *  - base image (white PNG)
+ *  - colour overlay with mix-blend:multiply (applies tint)
+ *  - soft highlight overlay with mix-blend:screen (keeps brightness)
+ */
+function TintedPiece({
+  piece,
+  hex,
+  title,
+  size = 48,
+}: {
+  piece: "helmet" | "chestplate" | "leggings" | "boots";
+  hex: string | null;
+  title?: string;
+  size?: number;
+}) {
+  const src = `/images/armor/${piece}.png`;
   return (
     <div
-      className="w-12 h-12"
-      title={`${piece} ${hex}`}
-      style={{
-        backgroundColor: hex,
-        WebkitMaskImage: `url(${url})`,
-        maskImage: `url(${url})`,
-        WebkitMaskRepeat: "no-repeat",
-        maskRepeat: "no-repeat",
-        WebkitMaskSize: "contain",
-        maskSize: "contain",
-        WebkitMaskPosition: "center",
-        maskPosition: "center",
-      }}
-    />
+      className="relative"
+      style={{ width: size, height: size }}
+      title={title || piece}
+    >
+      {/* Base white PNG */}
+      <img
+        src={src}
+        alt={piece}
+        className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+        style={{ filter: "grayscale(1) brightness(1)" }}
+      />
+      {/* Colour overlay (tint) */}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundColor: hex || "transparent",
+          mixBlendMode: "multiply",
+          opacity: hex ? 0.9 : 0, // if no hex, hide
+        }}
+      />
+      {/* Soft highlight to keep a bit of shine */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.15), rgba(255,255,255,0.00))",
+          mixBlendMode: "screen",
+          opacity: 0.35,
+        }}
+      />
+    </div>
   );
 }
 
-function SetIcon({ setLabel }: { setLabel: string }) {
+/** Helmet slot shows the **set icon** instead of a helmet PNG */
+function HelmetIconSlot({ setLabel, size = 48 }: { setLabel: string; size?: number }) {
   const key = inferDragonKey(setLabel);
-  if (!key) return null; // only show icons for mapped sets
+  if (!key) {
+    // fallback: show an untinted helmet png if no icon mapping
+    return <TintedPiece piece="helmet" hex={null} size={size} title="Helmet" />;
+  }
   const src = `/images/set-icons/${key}.png`;
   return (
-    <img
-      src={src}
-      alt={`${key} icon`}
-      className="h-5 w-auto opacity-90"
-      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-    />
+    <div
+      className="relative flex items-center justify-center"
+      style={{ width: size, height: size }}
+      title={`${key} set`}
+    >
+      <img
+        src={src}
+        alt={`${key} icon`}
+        className="max-w-full max-h-full object-contain opacity-90"
+        onError={(e) => {
+          // hide if missing
+          (e.currentTarget as HTMLImageElement).style.display = "none";
+        }}
+      />
+    </div>
   );
 }
 
-function ArmorPreview({ s }: { s: SetItem }) {
-  // per-piece exact hex, already in your API response
+/** Vertical armour stack: Helmet(icon) → Chest → Legs → Boots */
+function VerticalSetPreview({ s }: { s: SetItem }) {
   const h = normHex(s.pieces.helmet?.color);
   const c = normHex(s.pieces.chestplate?.color);
   const l = normHex(s.pieces.leggings?.color);
@@ -117,27 +195,15 @@ function ArmorPreview({ s }: { s: SetItem }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      {/* set/helmet icon above helmet */}
-      <SetIcon setLabel={s.setLabel} />
-      {/* 2x2 grid of pieces */}
-      <div className="grid grid-cols-2 gap-2">
-        <ArmorPiece hex={h} piece="helmet" />
-        <ArmorPiece hex={c} piece="chestplate" />
-        <ArmorPiece hex={l} piece="leggings" />
-        <ArmorPiece hex={b} piece="boots" />
-      </div>
-      {/* mini legend */}
-      <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-200/80 mt-1">
-        <span className="text-center">Helmet</span>
-        <span className="text-center">Chest</span>
-        <span className="text-center">Legs</span>
-        <span className="text-center">Boots</span>
-      </div>
+      <HelmetIconSlot setLabel={s.setLabel} />
+      <TintedPiece piece="chestplate" hex={c} title="Chestplate" />
+      <TintedPiece piece="leggings" hex={l} title="Leggings" />
+      <TintedPiece piece="boots" hex={b} title="Boots" />
     </div>
   );
 }
 
-// ---------- page ----------
+/* ---------------- page ---------------- */
 export default function SetsPage() {
   // inputs
   const [hex, setHex] = useState("");
@@ -174,7 +240,9 @@ export default function SetsPage() {
     setFavSets((prev) => {
       const has = prev.some((s) => s.favKey === favKey);
       const next = has ? prev.filter((s) => s.favKey !== favKey) : [...prev, { ...set, favKey }];
-      try { localStorage.setItem(LS_SETS, JSON.stringify(next)); } catch {}
+      try {
+        localStorage.setItem(LS_SETS, JSON.stringify(next));
+      } catch {}
       return next;
     });
   };
@@ -225,7 +293,10 @@ export default function SetsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
       <header className="py-10 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
+        <h1
+          className="text-4xl font-extrabold tracking-tight drop-shadow"
+          style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}
+        >
           Gibbo&apos;s Exo&apos;s — Sets
         </h1>
         <p className="mt-2 text-sm text-cyan-200/80">Search complete sets by hex + set name (per owner)</p>
@@ -307,7 +378,9 @@ export default function SetsPage() {
 
         {/* error */}
         {err && (
-          <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">{err}</div>
+          <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">
+            {err}
+          </div>
         )}
 
         {/* results */}
@@ -317,17 +390,21 @@ export default function SetsPage() {
               {items.map((it, idx) => {
                 const favKey = makeSetKey(it);
                 const fav = isFavSet(favKey);
+
+                // compute a representative hex from piece colours (shown in swatch & code)
+                const displayHex = computeSetDisplayHex(it) || normHex(it.color) || "#888888";
+
                 return (
                   <div key={idx} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
                     <div className="flex items-start gap-4">
-                      {/* left: swatch + hex */}
+                      {/* left: representative swatch */}
                       <div className="flex flex-col items-center gap-1">
                         <div
                           className="w-10 h-10 rounded-xl ring-1 ring-white/20"
-                          style={{ backgroundColor: it.color }}
-                          title={it.color}
+                          style={{ backgroundColor: displayHex }}
+                          title={displayHex}
                         />
-                        <code className="text-[11px] text-slate-200/90">{it.color}</code>
+                        <code className="text-[11px] text-slate-200/90">{displayHex}</code>
                       </div>
 
                       {/* middle: text info */}
@@ -372,47 +449,47 @@ export default function SetsPage() {
                           </div>
                         </div>
 
-                        {/* pieces grid (name + hex under each piece) */}
+                        {/* piece names + hexes */}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                          {it.pieces.helmet && (
-                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
-                              <div className="text-xs opacity-80">Helmet</div>
-                              <div className="font-medium truncate">{it.pieces.helmet.name}</div>
-                              <code className="text-[11px] opacity-90">{it.pieces.helmet.color}</code>
-                            </div>
-                          )}
                           {it.pieces.chestplate && (
                             <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                               <div className="text-xs opacity-80">Chestplate</div>
                               <div className="font-medium truncate">{it.pieces.chestplate.name}</div>
-                              <code className="text-[11px] opacity-90">{it.pieces.chestplate.color}</code>
+                              <code className="text-[11px] opacity-90">{normHex(it.pieces.chestplate.color)}</code>
                             </div>
                           )}
                           {it.pieces.leggings && (
                             <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                               <div className="text-xs opacity-80">Leggings</div>
                               <div className="font-medium truncate">{it.pieces.leggings.name}</div>
-                              <code className="text-[11px] opacity-90">{it.pieces.leggings.color}</code>
+                              <code className="text-[11px] opacity-90">{normHex(it.pieces.leggings.color)}</code>
                             </div>
                           )}
                           {it.pieces.boots && (
                             <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
                               <div className="text-xs opacity-80">Boots</div>
                               <div className="font-medium truncate">{it.pieces.boots.name}</div>
-                              <code className="text-[11px] opacity-90">{it.pieces.boots.color}</code>
+                              <code className="text-[11px] opacity-90">{normHex(it.pieces.boots.color)}</code>
+                            </div>
+                          )}
+                          {it.pieces.helmet && (
+                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                              <div className="text-xs opacity-80">Helmet</div>
+                              <div className="font-medium truncate">{it.pieces.helmet.name}</div>
+                              <code className="text-[11px] opacity-90">{normHex(it.pieces.helmet.color)}</code>
                             </div>
                           )}
                         </div>
                       </div>
 
-                      {/* right: visual armour preview + favourite toggle */}
+                      {/* right: vertical visual preview + favourite toggle */}
                       <div className="flex flex-col items-center gap-3">
-                        <ArmorPreview s={it} />
+                        <VerticalSetPreview s={it} />
                         <button
                           onClick={() => toggleFavSet(it)}
-                          className={`text-2xl leading-none ${isFavSet(favKey) ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
-                          title={isFavSet(favKey) ? "Remove set from favourites" : "Add set to favourites"}
-                          aria-label={isFavSet(favKey) ? "Unfavourite set" : "Favourite set"}
+                          className={`text-2xl leading-none ${fav ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
+                          title={fav ? "Remove set from favourites" : "Add set to favourites"}
+                          aria-label={fav ? "Unfavourite set" : "Favourite set"}
                         >
                           ★
                         </button>
