@@ -33,6 +33,35 @@ type ApiResp = {
 };
 
 /* ================================
+   LocalStorage: item favourites
+   ================================ */
+const LS_ITEM_FAVS = "gibbo-fav-items";
+
+function loadItemFavs(): ItemEntry[] {
+  try {
+    const raw = localStorage.getItem(LS_ITEM_FAVS);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+function saveItemFavs(list: ItemEntry[]) {
+  try { localStorage.setItem(LS_ITEM_FAVS, JSON.stringify(list)); } catch {}
+}
+function upsertFavItem(item: ItemEntry) {
+  const list = loadItemFavs();
+  if (!list.some(x => x.uuid === item.uuid)) {
+    list.push(item);
+    saveItemFavs(list);
+  }
+}
+function removeFavItem(uuid: string) {
+  const next = loadItemFavs().filter(x => x.uuid !== uuid);
+  saveItemFavs(next);
+}
+
+/* ================================
    Utilities
    ================================ */
 const MAX_TOL = 405;
@@ -97,7 +126,6 @@ const clamp01 = (x:number)=>Math.max(0,Math.min(1,x));
 
 /* ================================
    Canvas recolour for a single piece
-   (tinted *_tint.png under + recoloured *_base.png over)
    ================================ */
 const V_GAIN = 0.06;
 const GAMMA = 0.95;
@@ -203,7 +231,7 @@ async function recolorBaseOutline(baseUrl:string, hex:string, size:number){
   return cnv;
 }
 
-/* quick caches so we don't recompute every render */
+/* caches */
 const tintCache = new Map<string,string>();
 const baseCache = new Map<string,string>();
 async function getTint(url:string, hex:string, size:number){
@@ -294,6 +322,15 @@ export default function ItemsPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string|null>(null);
 
+  // favourites (items)
+  const [favSet, setFavSet] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    // hydrate favourites from LS on mount
+    const favs = loadItemFavs();
+    setFavSet(new Set(favs.map(f => f.uuid)));
+  }, []);
+
   const apiUrl = useMemo(() => {
     const usp = new URLSearchParams();
     usp.set("page", String(page));
@@ -301,7 +338,7 @@ export default function ItemsPage() {
     if (q.trim()) usp.set("q", q.trim());
     if (hex.trim()) usp.set("color", hex.trim());
     if (tolerance > 0) usp.set("tolerance", String(tolerance));
-    return `/api/search?${usp.toString()}`; // ← adjust if your endpoint differs
+    return `/api/search?${usp.toString()}`; // change if your endpoint is different
   }, [q, hex, page, limit, tolerance]);
 
   useEffect(() => { setPage(1); }, [q, hex, limit, tolerance]);
@@ -325,6 +362,32 @@ export default function ItemsPage() {
     })();
     return ()=>{ cancelled = true; };
   }, [apiUrl]);
+
+  const toggleFav = (item: ItemEntry) => {
+    setFavSet(prev => {
+      const next = new Set(prev);
+      if (next.has(item.uuid)) {
+        next.delete(item.uuid);
+        removeFavItem(item.uuid);
+      } else {
+        next.add(item.uuid);
+        // store minimal-but-useful payload (keep what you want to show in favourites)
+        upsertFavItem({
+          uuid: item.uuid,
+          name: item.name,
+          color: item.color ?? null,
+          rarity: item.rarity ?? null,
+          ownerUuid: item.ownerUuid ?? null,
+          ownerUsername: item.ownerUsername ?? null,
+          ownerAvatarUrl: item.ownerAvatarUrl ?? null,
+          ownerMcuuidUrl: item.ownerMcuuidUrl ?? null,
+          ownerPlanckeUrl: item.ownerPlanckeUrl ?? null,
+          ownerSkyCryptUrl: item.ownerSkyCryptUrl ?? null,
+        });
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
@@ -382,6 +445,8 @@ export default function ItemsPage() {
               {items.map((it) => {
                 const piece = inferPieceFromName(it.name);
                 const colorHex = normHex(it.color);
+                const isFav = favSet.has(it.uuid);
+
                 return (
                   <div key={it.uuid} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
                     <div className="flex items-start gap-4">
@@ -396,6 +461,18 @@ export default function ItemsPage() {
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold truncate text-slate-50">{it.name}</h3>
                           {it.rarity && <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">{it.rarity}</span>}
+
+                          {/* favourite toggle */}
+                          <button
+                            onClick={() => toggleFav(it)}
+                            className={`ml-1 -mr-1 text-lg leading-none transition ${
+                              isFav ? "text-yellow-300 hover:text-yellow-200" : "text-slate-400 hover:text-slate-200"
+                            }`}
+                            title={isFav ? "Unfavourite" : "Favourite"}
+                            aria-label={isFav ? "Unfavourite item" : "Favourite item"}
+                          >
+                            {isFav ? "★" : "☆"}
+                          </button>
                         </div>
 
                         {/* owner */}
