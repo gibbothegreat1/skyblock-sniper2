@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
-/* =========================
-   Types (as stored in LS)
-   ========================= */
+/* =========================================
+   Types (matches what you store in LS)
+   ========================================= */
 type PieceEntry = { uuid: string; name: string; color: string };
 type SetItem = {
-  favKey?: string;
+  favKey?: string; // present in your stored payloads
   setLabel: string;
   color?: string | null;
   rarity?: string | null;
@@ -28,23 +28,23 @@ type SetItem = {
   };
 };
 
-/* =========================
-   Constants
-   ========================= */
+/* =========================================
+   Constants (same as Sets page)
+   ========================================= */
 const LS_SETS = "gibbo-fav-sets";
 
 const ARMOUR_DIR = "/images/armor";
 const ICONS_DIR = "/images/set-icons";
 
-const PIECE_SIZE = 56;
-const ICON_SCALE = 0.9;
+const PIECE_SIZE = 56;       // preview size for chest/legs/boots
+const ICON_SCALE = 0.9;      // helmet icon fraction of piece size
 
-// tint pipeline (same as Sets)
+// tint pipeline
 const V_GAIN = 0.06;
 const GAMMA = 0.95;
 const HIGHLIGHT_OPACITY = 0.12;
 
-// base-outline recolour (skip leather browns)
+// base-outline recolour
 const BASE_BLEND = 0.55;
 const BASE_DARK_PUSH = 0.9;
 const BROWN_H_MIN = 12;
@@ -53,9 +53,9 @@ const BROWN_S_MIN = 0.25;
 const BROWN_V_MIN = 0.18;
 const BROWN_V_MAX = 0.85;
 
-/* =========================
+/* =========================================
    Color helpers
-   ========================= */
+   ========================================= */
 function normHex(h?: string | null) {
   if (!h) return null;
   const x = h.trim().replace(/^#/, "");
@@ -102,7 +102,7 @@ function hsvToRgb(h: number, s: number, v: number) {
 }
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 
-/* Representative set hex (avg of piece colours) */
+/* representative hex from piece colours */
 function hexToRgbMaybe(h?: string | null) { const n = normHex(h||""); return n ? hexToRgb(n) : null; }
 function computeSetDisplayHex(s: SetItem): string | null {
   const cols = [
@@ -116,10 +116,14 @@ function computeSetDisplayHex(s: SetItem): string | null {
   const avg: [number,number,number] = [sum[0]/cols.length, sum[1]/cols.length, sum[2]/cols.length];
   return rgbToHex(avg[0], avg[1], avg[2]);
 }
+function inferDragonKey(setLabel: string) {
+  const m = setLabel.toLowerCase().match(/\b(superior|wise|unstable|strong|young|old|protector|holy)\b/);
+  return m ? m[1] : null;
+}
 
-/* =========================
-   Image + canvas helpers
-   ========================= */
+/* =========================================
+   Canvas utils (same algorithms as Sets)
+   ========================================= */
 function loadImage(src: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
@@ -183,6 +187,7 @@ async function recolorTintToHex(tintUrl: string, hex: string, size: number): Pro
     ctx.drawImage(maskC, 0, 0);
     ctx.globalCompositeOperation = "source-over";
   }
+
   return cnv;
 }
 
@@ -250,14 +255,9 @@ async function getBase(url: string, hex: string, size: number) {
   return data;
 }
 
-/* =========================
+/* =========================================
    Armour UI
-   ========================= */
-function inferDragonKey(setLabel: string) {
-  const m = setLabel.toLowerCase().match(/\b(superior|wise|unstable|strong|young|old|protector|holy)\b/);
-  return m ? m[1] : null;
-}
-
+   ========================================= */
 function HelmetIconSlot({ setLabel }: { setLabel: string }) {
   const key = inferDragonKey(setLabel);
   const size = Math.round(PIECE_SIZE * ICON_SCALE);
@@ -285,13 +285,13 @@ function HelmetIconSlot({ setLabel }: { setLabel: string }) {
 
 function ArmourCanvas({
   piece, hex, size = PIECE_SIZE, title
-}: { piece:"helmet"|"chestplate"|"leggings"|"boots"; hex:string|null; size?:number; title?:string }) {
+}: { piece: "helmet" | "chestplate" | "leggings" | "boots"; hex: string | null; size?: number; title?: string }) {
   const tintUrl = `${ARMOUR_DIR}/${piece}_tint.png`;
   const baseUrl = `${ARMOUR_DIR}/${piece}_base.png`;
   const baseAlt = `${ARMOUR_DIR}/${piece}__base.png`;
 
-  const [imgTint, setImgTint] = useState<string|null>(null);
-  const [imgBase, setImgBase] = useState<string|null>(null);
+  const [imgTint, setImgTint] = useState<string | null>(null);
+  const [imgBase, setImgBase] = useState<string | null>(null);
   const [fallbackBase, setFallbackBase] = useState(false);
   const mounted = useRef(true);
 
@@ -340,9 +340,9 @@ function VerticalSetPreview({ s }: { s: SetItem }) {
   );
 }
 
-/* =========================
-   LocalStorage helpers
-   ========================= */
+/* =========================================
+   LocalStorage helpers (keep your current key)
+   ========================================= */
 function loadFavs(): SetItem[] {
   try {
     const raw = localStorage.getItem(LS_SETS);
@@ -354,13 +354,14 @@ function saveFavs(list: SetItem[]) {
   try { localStorage.setItem(LS_SETS, JSON.stringify(list)); } catch {}
 }
 
-/* =========================
+/* =========================================
    Page
-   ========================= */
+   ========================================= */
 export default function FavouritesPage() {
   const [items, setItems] = useState<SetItem[]>([]);
 
   const refresh = () => setItems(loadFavs());
+
   useEffect(() => { refresh(); }, []);
 
   const remove = (favKey?: string) => {
@@ -397,13 +398,13 @@ export default function FavouritesPage() {
               return (
                 <div key={favKey} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
                   <div className="flex items-start gap-4">
-                    {/* colour swatch */}
+                    {/* swatch */}
                     <div className="flex flex-col items-center gap-1">
                       <div className="w-10 h-10 rounded-xl ring-1 ring-white/20" style={{ backgroundColor: displayHex || "#888" }} />
                       <code className="text-[11px] text-slate-200/90">{displayHex}</code>
                     </div>
 
-                    {/* left info */}
+                    {/* info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold truncate text-slate-50">{s.setLabel}</h3>
@@ -412,6 +413,7 @@ export default function FavouritesPage() {
                         )}
                       </div>
 
+                      {/* owner */}
                       <div className="mt-1 flex items-center gap-2 text-sm">
                         {s.ownerAvatarUrl && <img src={s.ownerAvatarUrl} width={20} height={20} alt="avatar" className="rounded-md ring-1 ring-white/20" />}
                         {s.ownerUsername ? (
@@ -427,13 +429,45 @@ export default function FavouritesPage() {
                           {s.ownerMcuuidUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={s.ownerMcuuidUrl} target="_blank" rel="noreferrer">MCUUID</a>}
                         </div>
                       </div>
+
+                      {/* piece metadata */}
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                        {s.pieces.chestplate && (
+                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="text-xs opacity-80">Chestplate</div>
+                            <div className="font-medium truncate">{s.pieces.chestplate.name}</div>
+                            <code className="text-[11px] opacity-90">{normHex(s.pieces.chestplate.color)}</code>
+                          </div>
+                        )}
+                        {s.pieces.leggings && (
+                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="text-xs opacity-80">Leggings</div>
+                            <div className="font-medium truncate">{s.pieces.leggings.name}</div>
+                            <code className="text-[11px] opacity-90">{normHex(s.pieces.leggings.color)}</code>
+                          </div>
+                        )}
+                        {s.pieces.boots && (
+                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="text-xs opacity-80">Boots</div>
+                            <div className="font-medium truncate">{s.pieces.boots.name}</div>
+                            <code className="text-[11px] opacity-90">{normHex(s.pieces.boots.color)}</code>
+                          </div>
+                        )}
+                        {s.pieces.helmet && (
+                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="text-xs opacity-80">Helmet</div>
+                            <div className="font-medium truncate">{s.pieces.helmet.name}</div>
+                            <code className="text-[11px] opacity-90">{normHex(s.pieces.helmet.color)}</code>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    {/* right: vertical armour preview */}
+                    {/* right: vertical set preview */}
                     <VerticalSetPreview s={s} />
                   </div>
 
-                  {/* remove */}
+                  {/* footer: remove */}
                   <div className="mt-3 text-right">
                     <button
                       onClick={() => remove(s.favKey)}
