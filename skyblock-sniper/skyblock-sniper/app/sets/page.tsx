@@ -7,7 +7,7 @@ import Link from "next/link";
 type PieceEntry = { uuid: string; name: string; color: string };
 export type SetItem = {
   setLabel: string;
-  color: string; // API's search/target hex; we'll compute a display hex from pieces
+  color: string; // API's search/target hex; we compute displayHex from pieces
   rarity: string | null;
   ownerUuid: string | null;
   ownerUsername: string | null;
@@ -43,8 +43,8 @@ const MAX_TOL = 405;
 const LS_SETS = "gibbo-fav-sets";
 
 /* --------- where your assets live (adjust if needed) ---------- */
-const ARMOUR_DIR = "/images/armor";       // contains {piece}_base.png and {piece}_tint.png
-const ICONS_DIR  = "/images/set-icons";   // contains {superior|wise|unstable|...}.png
+const ARMOUR_DIR = "/images/armor";     // {piece}_base.png, {piece}_tint.png
+const ICONS_DIR  = "/images/set-icons"; // {superior|wise|unstable|strong|young|old|protector|holy}.png
 
 /* -------------------- Utils -------------------- */
 function normHex(h?: string | null) {
@@ -69,7 +69,7 @@ function rgbToHex(r: number, g: number, b: number) {
       .join("")
   );
 }
-/** Average the available piece colours to get a representative display hex */
+/** Average available piece colours to get a representative display hex */
 function computeSetDisplayHex(s: SetItem): string | null {
   const cols = [
     s.pieces.helmet?.color,
@@ -78,7 +78,10 @@ function computeSetDisplayHex(s: SetItem): string | null {
     s.pieces.boots?.color,
   ].map(hexToRgb).filter(Boolean) as [number, number, number][];
   if (!cols.length) return null;
-  const sum = cols.reduce((acc, [r, g, b]) => [acc[0] + r, acc[1] + g, acc[2] + b], [0, 0, 0] as [number, number, number]);
+  const sum = cols.reduce(
+    (acc, [r, g, b]) => [acc[0] + r, acc[1] + g, acc[2] + b],
+    [0, 0, 0] as [number, number, number]
+  );
   const avg: [number, number, number] = [sum[0] / cols.length, sum[1] / cols.length, sum[2] / cols.length];
   return rgbToHex(avg[0], avg[1], avg[2]);
 }
@@ -117,22 +120,19 @@ function HelmetIconSlot({ setLabel, size = 56 }: { setLabel: string; size?: numb
       alt={`${key} icon`}
       className="mx-auto opacity-90"
       style={{ width: size, height: size, objectFit: "contain" }}
-      onError={(e) => {
-        // If icon 404s, quietly fall back to base helmet
-        (e.currentTarget as HTMLImageElement).src = `${ARMOUR_DIR}/helmet_base.png`;
-      }}
+      onError={(e) => { (e.currentTarget as HTMLImageElement).src = `${ARMOUR_DIR}/helmet_base.png`; }}
     />
   );
 }
 
 /**
- * Tinted armour using your two-file approach:
+ * Tinted armour using two files:
  *  1) Base image (no colour)
- *  2) Solid colour layer
- *  3) Grayscale *_tint.png with mix-blend:multiply (preserves detail)
- *  4) Gentle screen highlight
+ *  2) Masked colour layer (masked by *_tint.png)
+ *  3) Optional screen highlight (also masked)
  *
- * It also auto-handles the boots filename quirk (boots__base.png).
+ * The **mask** ensures only the armour pixels get coloured (not the whole square).
+ * Also auto-handles the boots__base.png filename quirk.
  */
 function TintedArmour({
   piece,
@@ -146,42 +146,47 @@ function TintedArmour({
   title?: string;
 }) {
   const baseDefault = `${ARMOUR_DIR}/${piece}_base.png`;
-  const baseAlt     = `${ARMOUR_DIR}/${piece}__base.png`; // in case of "boots__base.png"
+  const baseAlt     = `${ARMOUR_DIR}/${piece}__base.png`; // for e.g. boots__base.png
   const tintSrc     = `${ARMOUR_DIR}/${piece}_tint.png`;
 
   const [baseSrc, setBaseSrc] = useState(baseDefault);
 
+  const maskStyles: React.CSSProperties = {
+    WebkitMaskImage: `url(${tintSrc})`,
+    maskImage: `url(${tintSrc})`,
+    WebkitMaskRepeat: "no-repeat",
+    maskRepeat: "no-repeat",
+    WebkitMaskSize: "contain",
+    maskSize: "contain",
+    WebkitMaskPosition: "center",
+    maskPosition: "center",
+  };
+
   return (
     <div className="relative" title={title || piece} style={{ width: size, height: size }}>
-      {/* 1) Base image */}
+      {/* 1) Base image (grayscale/no colour) */}
       <img
         src={baseSrc}
         alt={`${piece} base`}
         className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-        onError={() => {
-          // if {piece}_base.png fails (e.g., boots), try {piece}__base.png
-          if (baseSrc !== baseAlt) setBaseSrc(baseAlt);
+        onError={() => { if (baseSrc !== baseAlt) setBaseSrc(baseAlt); }}
+      />
+
+      {/* 2) Masked colour layer (only tints the non-transparent pixels of *_tint.png) */}
+      <div
+        className="absolute inset-0"
+        style={{
+          ...maskStyles,
+          backgroundColor: hex || "transparent",
+          mixBlendMode: "multiply",
         }}
       />
 
-      {/* 2) Colour layer */}
-      <div
-        className="absolute inset-0"
-        style={{ backgroundColor: hex || "transparent" }}
-      />
-
-      {/* 3) Multiply layer: grayscale tint PNG */}
-      <img
-        src={tintSrc}
-        alt={`${piece} tint`}
-        className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
-        style={{ mixBlendMode: "multiply", opacity: hex ? 1 : 0 }}
-      />
-
-      {/* 4) Soft highlight */}
+      {/* 3) Soft highlight (also masked) */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
+          ...maskStyles,
           background: "linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0))",
           mixBlendMode: "screen",
           opacity: 0.35,
