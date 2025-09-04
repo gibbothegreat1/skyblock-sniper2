@@ -7,7 +7,7 @@ import Link from "next/link";
 type PieceEntry = { uuid: string; name: string; color: string };
 export type SetItem = {
   setLabel: string;
-  color: string; // API's target/search hex; we'll compute our own displayHex
+  color: string; // API's search/target hex; we'll compute a display hex from pieces
   rarity: string | null;
   ownerUuid: string | null;
   ownerUsername: string | null;
@@ -41,6 +41,10 @@ type ApiResp = {
 
 const MAX_TOL = 405;
 const LS_SETS = "gibbo-fav-sets";
+
+/* --------- where your assets live (adjust if needed) ---------- */
+const ARMOUR_DIR = "/images/armor";       // contains {piece}_base.png and {piece}_tint.png
+const ICONS_DIR  = "/images/set-icons";   // contains {superior|wise|unstable|...}.png
 
 /* -------------------- Utils -------------------- */
 function normHex(h?: string | null) {
@@ -78,7 +82,6 @@ function computeSetDisplayHex(s: SetItem): string | null {
   const avg: [number, number, number] = [sum[0] / cols.length, sum[1] / cols.length, sum[2] / cols.length];
   return rgbToHex(avg[0], avg[1], avg[2]);
 }
-
 function makeSetKey(s: SetItem) {
   return [
     s.ownerUuid || "?",
@@ -95,22 +98,42 @@ function inferDragonKey(setLabel: string): string | null {
 }
 
 /* -------------------- Armour UI -------------------- */
+/** Helmet slot: show set icon; if missing, fall back to helmet_base.png */
 function HelmetIconSlot({ setLabel, size = 56 }: { setLabel: string; size?: number }) {
   const key = inferDragonKey(setLabel);
-  if (!key) return null;
-  const src = `/armour/icons/${key}.png`;
+  if (!key) {
+    return (
+      <img
+        src={`${ARMOUR_DIR}/helmet_base.png`}
+        alt="Helmet"
+        className="mx-auto opacity-90"
+        style={{ width: size, height: size, objectFit: "contain" }}
+      />
+    );
+  }
   return (
     <img
-      src={src}
+      src={`${ICONS_DIR}/${key}.png`}
       alt={`${key} icon`}
       className="mx-auto opacity-90"
       style={{ width: size, height: size, objectFit: "contain" }}
-      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+      onError={(e) => {
+        // If icon 404s, quietly fall back to base helmet
+        (e.currentTarget as HTMLImageElement).src = `${ARMOUR_DIR}/helmet_base.png`;
+      }}
     />
   );
 }
 
-/** Renders a single armour piece using *_base.png + *_tint.png with a multiply tint overlay (preserves detail). */
+/**
+ * Tinted armour using your two-file approach:
+ *  1) Base image (no colour)
+ *  2) Solid colour layer
+ *  3) Grayscale *_tint.png with mix-blend:multiply (preserves detail)
+ *  4) Gentle screen highlight
+ *
+ * It also auto-handles the boots filename quirk (boots__base.png).
+ */
 function TintedArmour({
   piece,
   hex,
@@ -122,38 +145,44 @@ function TintedArmour({
   size?: number;
   title?: string;
 }) {
-  const base = `/armour/${piece}_base.png`;
-  const tint = `/armour/${piece}_tint.png`;
+  const baseDefault = `${ARMOUR_DIR}/${piece}_base.png`;
+  const baseAlt     = `${ARMOUR_DIR}/${piece}__base.png`; // in case of "boots__base.png"
+  const tintSrc     = `${ARMOUR_DIR}/${piece}_tint.png`;
+
+  const [baseSrc, setBaseSrc] = useState(baseDefault);
+
   return (
     <div className="relative" title={title || piece} style={{ width: size, height: size }}>
-      {/* Base (no colour) */}
+      {/* 1) Base image */}
       <img
-        src={base}
+        src={baseSrc}
         alt={`${piece} base`}
         className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+        onError={() => {
+          // if {piece}_base.png fails (e.g., boots), try {piece}__base.png
+          if (baseSrc !== baseAlt) setBaseSrc(baseAlt);
+        }}
       />
-      {/* Tint overlay applied ONLY to the *_tint.png image */}
-      {hex && (
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundColor: hex,
-            mixBlendMode: "multiply",
-          }}
-        >
-          <img
-            src={tint}
-            alt={`${piece} tint`}
-            className="w-full h-full object-contain select-none pointer-events-none"
-            style={{ display: "block" }}
-          />
-        </div>
-      )}
-      {/* Optional gentle highlight to avoid looking muddy */}
+
+      {/* 2) Colour layer */}
+      <div
+        className="absolute inset-0"
+        style={{ backgroundColor: hex || "transparent" }}
+      />
+
+      {/* 3) Multiply layer: grayscale tint PNG */}
+      <img
+        src={tintSrc}
+        alt={`${piece} tint`}
+        className="absolute inset-0 w-full h-full object-contain select-none pointer-events-none"
+        style={{ mixBlendMode: "multiply", opacity: hex ? 1 : 0 }}
+      />
+
+      {/* 4) Soft highlight */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          background: "linear-gradient(180deg, rgba(255,255,255,.15), rgba(255,255,255,0))",
+          background: "linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0))",
           mixBlendMode: "screen",
           opacity: 0.35,
         }}
@@ -162,7 +191,7 @@ function TintedArmour({
   );
 }
 
-/** Vertical stack: Helmet (icon in this slot) → Chest → Legs → Boots */
+/** Vertical stack: Helmet (icon) → Chest → Legs → Boots */
 function VerticalSetPreview({ s }: { s: SetItem }) {
   const c = normHex(s.pieces.chestplate?.color);
   const l = normHex(s.pieces.leggings?.color);
