@@ -41,7 +41,9 @@ type ApiResp = {
 const MAX_TOL = 405;
 const LS_SETS = "gibbo-fav-sets";
 
-// deterministic key for a set favourite
+type FavSet = SetItem & { favKey: string };
+
+// ---------- helpers ----------
 function makeSetKey(s: SetItem) {
   return [
     s.ownerUuid || "?",
@@ -54,8 +56,88 @@ function makeSetKey(s: SetItem) {
   ].join("|");
 }
 
-type FavSet = SetItem & { favKey: string };
+function normHex(h?: string | null) {
+  if (!h) return null;
+  const x = h.trim().replace(/^#/, "");
+  return /^([0-9a-fA-F]{6})$/.test(x) ? `#${x.toLowerCase()}` : null;
+}
 
+function inferDragonKey(setLabel: string): string | null {
+  // tries to pull "wise", "superior", etc from strings like "Wise Dragon"
+  const m = setLabel.toLowerCase().match(/\b(superior|wise|unstable|strong|young|old|protector|holy)\b/);
+  return m ? m[1] : null;
+}
+
+// ---------- tiny UI components ----------
+function ArmorPiece({ hex, piece }: { hex: string | null; piece: "helmet"|"chestplate"|"leggings"|"boots" }) {
+  const url = `/images/armor/${piece}.png`;
+  // If no hex, show a subtle placeholder box
+  if (!hex) {
+    return <div className="w-12 h-12 rounded-lg bg-white/5 ring-1 ring-white/10" title="No piece" />;
+  }
+  return (
+    <div
+      className="w-12 h-12"
+      title={`${piece} ${hex}`}
+      style={{
+        backgroundColor: hex,
+        WebkitMaskImage: `url(${url})`,
+        maskImage: `url(${url})`,
+        WebkitMaskRepeat: "no-repeat",
+        maskRepeat: "no-repeat",
+        WebkitMaskSize: "contain",
+        maskSize: "contain",
+        WebkitMaskPosition: "center",
+        maskPosition: "center",
+      }}
+    />
+  );
+}
+
+function SetIcon({ setLabel }: { setLabel: string }) {
+  const key = inferDragonKey(setLabel);
+  if (!key) return null; // only show icons for mapped sets
+  const src = `/images/set-icons/${key}.png`;
+  return (
+    <img
+      src={src}
+      alt={`${key} icon`}
+      className="h-5 w-auto opacity-90"
+      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+    />
+  );
+}
+
+function ArmorPreview({ s }: { s: SetItem }) {
+  // per-piece exact hex, already in your API response
+  const h = normHex(s.pieces.helmet?.color);
+  const c = normHex(s.pieces.chestplate?.color);
+  const l = normHex(s.pieces.leggings?.color);
+  const b = normHex(s.pieces.boots?.color);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {/* set/helmet icon above helmet */}
+      <SetIcon setLabel={s.setLabel} />
+      {/* 2x2 grid of pieces */}
+      <div className="grid grid-cols-2 gap-2">
+        <ArmorPiece hex={h} piece="helmet" />
+        <ArmorPiece hex={c} piece="chestplate" />
+        <ArmorPiece hex={l} piece="leggings" />
+        <ArmorPiece hex={b} piece="boots" />
+      </div>
+      {/* mini legend */}
+      <div className="grid grid-cols-2 gap-1 text-[10px] text-slate-200/80 mt-1">
+        <span className="text-center">Helmet</span>
+        <span className="text-center">Chest</span>
+        <span className="text-center">Legs</span>
+        <span className="text-center">Boots</span>
+      </div>
+    </div>
+  );
+}
+
+// ---------- page ----------
 export default function SetsPage() {
   // inputs
   const [hex, setHex] = useState("");
@@ -86,15 +168,12 @@ export default function SetsPage() {
       setFavSets([]);
     }
   }, []);
-
   const isFavSet = (favKey: string) => favSets.some((s) => s.favKey === favKey);
   const toggleFavSet = (set: SetItem) => {
     const favKey = makeSetKey(set);
     setFavSets((prev) => {
       const has = prev.some((s) => s.favKey === favKey);
-      const next = has
-        ? prev.filter((s) => s.favKey !== favKey)
-        : [...prev, { ...set, favKey }];
+      const next = has ? prev.filter((s) => s.favKey !== favKey) : [...prev, { ...set, favKey }];
       try { localStorage.setItem(LS_SETS, JSON.stringify(next)); } catch {}
       return next;
     });
@@ -146,24 +225,15 @@ export default function SetsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
       <header className="py-10 text-center">
-        <h1
-          className="text-4xl font-extrabold tracking-tight drop-shadow"
-          style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}
-        >
+        <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
           Gibbo&apos;s Exo&apos;s — Sets
         </h1>
         <p className="mt-2 text-sm text-cyan-200/80">Search complete sets by hex + set name (per owner)</p>
 
         <div className="mt-4 flex gap-3 justify-center">
-          <Link href="/" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">
-            All Items
-          </Link>
-          <Link href="/favourites" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">
-            Favourites
-          </Link>
-          <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">
-            Sets
-          </span>
+          <Link href="/" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">All Items</Link>
+          <Link href="/favourites" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">Favourites</Link>
+          <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">Sets</span>
         </div>
       </header>
 
@@ -221,11 +291,7 @@ export default function SetsPage() {
               className="w-full accent-cyan-300"
             />
             <label className="mt-2 flex items-center gap-2 text-xs text-cyan-100/90">
-              <input
-                type="checkbox"
-                checked={exactGroup}
-                onChange={(e) => setExactGroup(e.target.checked)}
-              />
+              <input type="checkbox" checked={exactGroup} onChange={(e) => setExactGroup(e.target.checked)} />
               Exact group hexes only
             </label>
           </div>
@@ -241,9 +307,7 @@ export default function SetsPage() {
 
         {/* error */}
         {err && (
-          <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">
-            {err}
-          </div>
+          <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">{err}</div>
         )}
 
         {/* results */}
@@ -255,8 +319,8 @@ export default function SetsPage() {
                 const fav = isFavSet(favKey);
                 return (
                   <div key={idx} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
-                    <div className="flex items-start gap-3">
-                      {/* color swatch */}
+                    <div className="flex items-start gap-4">
+                      {/* left: swatch + hex */}
                       <div className="flex flex-col items-center gap-1">
                         <div
                           className="w-10 h-10 rounded-xl ring-1 ring-white/20"
@@ -266,38 +330,26 @@ export default function SetsPage() {
                         <code className="text-[11px] text-slate-200/90">{it.color}</code>
                       </div>
 
-                      {/* set header */}
+                      {/* middle: text info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold truncate text-slate-50">
                             {it.setLabel}
                             {it.isExact ? (
-                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/25">
-                                exact
-                              </span>
+                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/25">exact</span>
                             ) : typeof it.avgDist === "number" ? (
-                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 text-slate-100 ring-1 ring-white/15">
-                                avg {it.avgDist}
-                              </span>
+                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 text-slate-100 ring-1 ring-white/15">avg {it.avgDist}</span>
                             ) : null}
                           </h3>
                           {it.rarity && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">
-                              {it.rarity}
-                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">{it.rarity}</span>
                           )}
                         </div>
 
                         {/* owner + links */}
                         <div className="mt-1 flex items-center gap-2 text-sm">
                           {it.ownerAvatarUrl && (
-                            <img
-                              src={it.ownerAvatarUrl}
-                              width={20}
-                              height={20}
-                              alt="avatar"
-                              className="rounded-md ring-1 ring-white/20"
-                            />
+                            <img src={it.ownerAvatarUrl} width={20} height={20} alt="avatar" className="rounded-md ring-1 ring-white/20" />
                           )}
                           {it.ownerUsername ? (
                             <span className="text-slate-100">{it.ownerUsername}</span>
@@ -320,7 +372,7 @@ export default function SetsPage() {
                           </div>
                         </div>
 
-                        {/* pieces grid (with per-piece hex) */}
+                        {/* pieces grid (name + hex under each piece) */}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                           {it.pieces.helmet && (
                             <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
@@ -353,15 +405,18 @@ export default function SetsPage() {
                         </div>
                       </div>
 
-                      {/* favourite toggle */}
-                      <button
-                        onClick={() => toggleFavSet(it)}
-                        className={`shrink-0 text-2xl leading-none ${fav ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
-                        title={fav ? "Remove set from favourites" : "Add set to favourites"}
-                        aria-label={fav ? "Unfavourite set" : "Favourite set"}
-                      >
-                        ★
-                      </button>
+                      {/* right: visual armour preview + favourite toggle */}
+                      <div className="flex flex-col items-center gap-3">
+                        <ArmorPreview s={it} />
+                        <button
+                          onClick={() => toggleFavSet(it)}
+                          className={`text-2xl leading-none ${isFavSet(favKey) ? "text-yellow-300 drop-shadow" : "text-slate-400 hover:text-yellow-300"}`}
+                          title={isFavSet(favKey) ? "Remove set from favourites" : "Add set to favourites"}
+                          aria-label={isFavSet(favKey) ? "Unfavourite set" : "Favourite set"}
+                        >
+                          ★
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -378,9 +433,7 @@ export default function SetsPage() {
                 >
                   Prev
                 </button>
-                <span className="text-sm text-slate-200/90">
-                  Page {page} / {totalPages} &nbsp;•&nbsp; {total} sets
-                </span>
+                <span className="text-sm text-slate-200/90">Page {page} / {totalPages} &nbsp;•&nbsp; {total} sets</span>
                 <button
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
