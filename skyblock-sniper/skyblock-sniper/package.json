@@ -8,6 +8,7 @@
     "start": "next start",
     "import": "node scripts/import.js",
     "import:ha3l": "node scripts/import-ha3l.js"
+     "build:pieces": "node scripts/build-pieces.js"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.0",
