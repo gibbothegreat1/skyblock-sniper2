@@ -2,16 +2,38 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 
-/* ---------- CSV utils ---------- */
-function parseCSV(raw: string): Record<string, string>[] {
+/* =========================
+   Types
+   ========================= */
+type RawRow = Record<string, string>;
+
+type ItemOut = {
+  uuid: string;
+  name: string;
+  color: string | null;
+  rarity: string | null;
+  ownerUuid: string | null;
+  ownerUsername: string | null;
+  ownerAvatarUrl: string | null;
+  ownerMcuuidUrl: string | null;
+  ownerPlanckeUrl: string | null;
+  ownerSkyCryptUrl: string | null;
+};
+
+type ItemWithRaw = ItemOut & { __raw: RawRow };
+
+/* =========================
+   CSV utils
+   ========================= */
+function parseCSV(raw: string): RawRow[] {
   const clean = raw.replace(/^\uFEFF/, "").replace(/\r/g, "");
   const lines = clean.split("\n").filter(Boolean);
   if (!lines.length) return [];
   const header = splitCsvLine(lines[0]).map((h) => h.trim());
-  const rows: Record<string, string>[] = [];
+  const rows: RawRow[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = splitCsvLine(lines[i]);
-    const row: Record<string, string> = {};
+    const row: RawRow = {};
     for (let j = 0; j < header.length; j++) row[header[j]] = (cols[j] ?? "").trim();
     rows.push(row);
   }
@@ -35,7 +57,9 @@ function splitCsvLine(line: string): string[] {
   return out;
 }
 
-/* ---------- helpers ---------- */
+/* =========================
+   Helpers
+   ========================= */
 function normalizeHex(h: string | null) {
   if (!h) return null;
   const x = h.replace(/^#/, "").toLowerCase();
@@ -49,19 +73,19 @@ function rgbDist(a:[number,number,number], b:[number,number,number]) {
   // Manhattan distance 0..765
   return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]) + Math.abs(a[2]-b[2]);
 }
-function inferPieceFrom(text: string | null) {
-  if (!text) return null;
-  const n = text.toLowerCase();
-  if (/\b(helm|helmet|mask|cap)\b/.test(n)) return "helmet";
-  if (/\b(chest|chestplate|torso|tunic|plate)\b/.test(n)) return "chestplate";
-  if (/\b(leg|legging|leggings|pants|trouser)\b/.test(n)) return "leggings";
-  if (/\b(boot|boots|shoe|shoes|greave)\b/.test(n)) return "boots";
-  return null;
-}
 function cryptoRandomId() {
   return "old_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
-function mapRowToItem(row: Record<string,string>) {
+function getCsvPath(): string | null {
+  const prefer = path.join(process.cwd(), "data", "old_dragon_pieces_clean.csv");
+  if (fs.existsSync(prefer)) return prefer;
+  const alt = "/mnt/data/old_dragon_pieces_clean.csv";
+  if (fs.existsSync(alt)) return alt;
+  return null;
+}
+
+/** map arbitrary CSV row → our item schema (+ keep __raw for flexible search) */
+function mapRowToItem(row: RawRow): ItemWithRaw {
   const get = (...keys: string[]) => {
     for (const k of keys) {
       if (k in row && String(row[k]).trim() !== "") return String(row[k]).trim();
@@ -81,23 +105,24 @@ function mapRowToItem(row: Record<string,string>) {
   const ownerPlanckeUrl = get("plancke_url","ownerPlanckeUrl");
   const ownerSkyCryptUrl = get("skycrypt_url","ownerSkyCryptUrl");
 
-  // Keep any extra fields so we can search across them
   return {
-    uuid, name, color, rarity,
-    ownerUuid, ownerUsername, ownerAvatarUrl, ownerMcuuidUrl, ownerPlanckeUrl, ownerSkyCryptUrl,
-    __raw: row
+    uuid,
+    name,
+    color,
+    rarity,
+    ownerUuid,
+    ownerUsername,
+    ownerAvatarUrl,
+    ownerMcuuidUrl,
+    ownerPlanckeUrl,
+    ownerSkyCryptUrl,
+    __raw: row,
   };
 }
 
-function getCsvPath(): string | null {
-  const prefer = path.join(process.cwd(), "data", "old_dragon_pieces_clean.csv");
-  if (fs.existsSync(prefer)) return prefer;
-  const alt = "/mnt/data/old_dragon_pieces_clean.csv";
-  if (fs.existsSync(alt)) return alt;
-  return null;
-}
-
-/* ---------- handler ---------- */
+/* =========================
+   Handler
+   ========================= */
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
@@ -113,13 +138,13 @@ export async function GET(req: Request) {
     }
 
     const raw = await fs.promises.readFile(csvPath, "utf8");
-    let items = parseCSV(raw).map(mapRowToItem);
+    let items: ItemWithRaw[] = parseCSV(raw).map(mapRowToItem);
 
-    // 🔎 text search across ALL columns (fallback if name doesn’t contain your query)
+    // 🔎 text search across ALL columns
     if (q) {
       items = items.filter(it => {
         if (it.name?.toLowerCase().includes(q)) return true;
-        const joined = Object.values(it.__raw as Record<string,string>).join(" ").toLowerCase();
+        const joined = Object.values(it.__raw).join(" ").toLowerCase();
         return joined.includes(q);
       });
     }
@@ -130,16 +155,13 @@ export async function GET(req: Request) {
       items = items.filter(it => it.color && rgbDist(hexToRgb(it.color), target) <= tol);
     }
 
-    // (optional) If you ONLY want armour pieces, uncomment next line
-    // items = items.filter(it => inferPieceFrom(it.name) || inferPieceFrom((it.__raw?.piece||it.__raw?.slot||null) as string|null));
+    // Now drop the helper field for output/pagination
+    const itemsOut: ItemOut[] = items.map(({ __raw, ...rest }) => rest);
 
-    // strip helper field
-    items = items.map(({ __raw, ...rest }) => rest);
-
-    const total = items.length;
+    const total = itemsOut.length;
     const totalPages = Math.max(1, Math.ceil(total / limit));
     const start = (page - 1) * limit;
-    const paged = items.slice(start, start + limit);
+    const paged = itemsOut.slice(start, start + limit);
 
     return NextResponse.json({ ok:true, page, limit, total, totalPages, items: paged });
   } catch (e:any) {
