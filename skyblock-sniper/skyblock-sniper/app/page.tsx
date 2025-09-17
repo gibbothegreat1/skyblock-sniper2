@@ -392,16 +392,37 @@ export default function ItemsPage() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
       <header className="py-10 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
-          Gibbo&apos;s Exo&apos;s — Items
-        </h1>
-        <div className="mt-4 flex gap-3 justify-center">
-          <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">All Items</span>
-          <Link href="/sets" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">Sets</Link>
-          <Link href="/favourites" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">Favourites</Link>
-        </div>
-      </header>
+  <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
+    Gibbo&apos;s Exo&apos;s — Items
+  </h1>
 
+  {/* ▼ replace your current tabs div with this one ▼ */}
+  <div className="mt-4 flex gap-3 justify-center">
+    <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">
+      All Items
+    </span>
+    <Link
+      href="/sets"
+      className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
+    >
+      Sets
+    </Link>
+    <Link
+      href="/favourites"
+      className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
+    >
+      Favourites
+    </Link>
+    {/* new tab */}
+    <Link
+      href="/old"
+      className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition"
+    >
+      Old Dragon
+    </Link>
+  </div>
+  {/* ▲ end replace ▲ */}
+</header>
       <main className="max-w-6xl mx-auto px-4 pb-16">
         {/* Filters */}
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
