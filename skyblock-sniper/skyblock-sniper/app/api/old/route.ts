@@ -136,7 +136,7 @@ function mapRow(row: RawRow): ItemWithRaw {
     ownerUsername: null, // filled later by resolver
     ownerAvatarUrl: ownerUuid ? `https://crafatar.com/avatars/${ownerUuid}?size=20&overlay` : null,
     ownerMcuuidUrl: ownerUuid ? `https://mcuuid.net/?q=${ownerUuid}` : null,
-    ownerPlanckeUrl: ownerUuid ? `https://plancke.io/hypixel/player/stats/${ownerUuid}` : null,
+    ownerPlanckeUrl: ownerUuid ? `https://plancke.io/hypixel/player/stats/${it.ownerUsername}` : null,
     ownerSkyCryptUrl: ownerUuid
       ? `https://sky.shiiyu.moe/stats/${ownerUuid}${ownerProfile ? `/${ownerProfile}` : ""}`
       : null,
