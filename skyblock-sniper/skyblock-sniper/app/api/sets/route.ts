@@ -49,6 +49,10 @@ function detectPiece(name: string): PieceKind | null {
   return null;
 }
 
+// “dragon” in q -> 3-piece (no helmet), otherwise 4-piece
+function requiresHelmet(setQuery: string): boolean {
+  return !/dragon/i.test(setQuery || "");
+}
 
 // XxXxXx nibble weights for #RRGGBB (max distance 405)
 const NIBBLE_WEIGHTS = [8, 1, 8, 1, 8, 1];
