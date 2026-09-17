@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import SiteChrome from "../components/SiteChrome";
+import CheckMeButton from "../components/CheckMeButton";
+import NonExoticToggles from "../components/NonExoticToggles";
 
 /* =========================================
    Types
    ========================================= */
-type PieceEntry = { uuid: string; name: string; color: string };
+type PieceEntry = { uuid: string; name: string; color: string; hexType?: "fairy" | "crystal" | null };
 export type SetItem = {
   setLabel: string;
   color: string;
@@ -44,7 +46,7 @@ type ApiResp = {
 /* =========================================
    Constants
    ========================================= */
-const MAX_TOL = 405;
+const MAX_TOL = 100;
 const LS_SETS = "gibbo-fav-sets";
 
 const ARMOUR_DIR = "/images/armor";
@@ -133,6 +135,12 @@ function computeSetDisplayHex(s: SetItem): string | null {
   const avg: [number,number,number] = [sum[0]/cols.length, sum[1]/cols.length, sum[2]/cols.length];
   return rgbToHex(avg[0], avg[1], avg[2]);
 }
+
+function setPieceList(s: SetItem): PieceEntry[] {
+  return [s.pieces.helmet, s.pieces.chestplate, s.pieces.leggings, s.pieces.boots]
+    .filter((piece): piece is PieceEntry => Boolean(piece));
+}
+
 function makeSetKey(s: SetItem) {
   return [s.ownerUuid||"?", s.setLabel||"?", s.pieces.helmet?.uuid||"", s.pieces.chestplate?.uuid||"", s.pieces.leggings?.uuid||"", s.pieces.boots?.uuid||""].join("|");
 }
@@ -378,6 +386,8 @@ export default function SetsPage() {
   const [q, setQ] = useState("");
   const [tolerance, setTolerance] = useState(0);
   const [exactGroup, setExactGroup] = useState(false);
+  const [includeFairy, setIncludeFairy] = useState(false);
+  const [includeCrystal, setIncludeCrystal] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(24);
   const [items, setItems] = useState<SetItem[]>([]);
@@ -399,8 +409,10 @@ export default function SetsPage() {
     if (q.trim()) usp.set("q", q.trim());
     if (tolerance > 0) usp.set("tolerance", String(tolerance));
     if (exactGroup) usp.set("exactGroup","1");
+    if (includeFairy) usp.set("includeFairy", "1");
+    if (includeCrystal) usp.set("includeCrystal", "1");
     return `/api/sets?${usp.toString()}`;
-  }, [hex, q, page, limit, tolerance, exactGroup]);
+  }, [hex, q, page, limit, tolerance, exactGroup, includeFairy, includeCrystal]);
 
   useEffect(() => {
     if (!hex.trim() || !q.trim()) { setItems([]); setTotal(0); setTotalPages(0); setErr(null); return; }
@@ -423,7 +435,7 @@ export default function SetsPage() {
     return () => { cancelled = true; };
   }, [apiUrl]);
 
-  useEffect(() => { setPage(1); }, [hex, q, limit, tolerance, exactGroup]);
+  useEffect(() => { setPage(1); }, [hex, q, limit, tolerance, exactGroup, includeFairy, includeCrystal]);
 
   const toggleFav = (s: SetItem) => {
     const key = makeSetKey(s);
@@ -445,7 +457,7 @@ export default function SetsPage() {
     <div className="site-shell">
       <SiteChrome
         title="Gibbo's Exotics — Sets"
-        subtitle="Find complete armour sets owned by the same player and compare exact or nearby colours."
+        subtitle="Find complete armour sets owned by the same player and rank nearby colours by perceptual CIEDE2000 (ΔE) distance."
       />
 
       <main className="content-wrap page-content">
@@ -469,13 +481,16 @@ export default function SetsPage() {
 
           <div className="theme-subpanel lg:col-span-1 p-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-cyan-200/80">Nearby tolerance</span>
-              <code className="text-[10px] text-cyan-200/90">tol: {tolerance}</code>
+              <span className="text-xs text-cyan-200/80">Visual tolerance (ΔE)</span>
+              <code className="text-[10px] text-cyan-200/90">ΔE {tolerance}</code>
             </div>
             <input type="range" min={0} max={MAX_TOL} step={1} value={tolerance} onChange={e=>setTolerance(parseInt(e.target.value,10))} className="w-full accent-cyan-300" />
             <label className="mt-2 flex items-center gap-2 text-xs text-cyan-100/90">
               <input type="checkbox" checked={exactGroup} onChange={e=>setExactGroup(e.target.checked)} /> Exact group hexes only
             </label>
+          </div>
+          <div className="lg:col-span-5">
+            <NonExoticToggles compact includeFairy={includeFairy} includeCrystal={includeCrystal} onFairy={setIncludeFairy} onCrystal={setIncludeCrystal} />
           </div>
         </div>
 
@@ -514,7 +529,7 @@ export default function SetsPage() {
                             {it.isExact ? (
                               <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/25">exact</span>
                             ) : typeof it.avgDist === "number" ? (
-                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 text-slate-100 ring-1 ring-white/15">avg {it.avgDist}</span>
+                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-white/10 text-slate-100 ring-1 ring-white/15">avg ΔE {it.avgDist.toFixed(2)}</span>
                             ) : null}
                           </h3>
                           {it.rarity && <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">{it.rarity}</span>}
@@ -566,8 +581,13 @@ export default function SetsPage() {
                         </div>
                       </div>
 
-                      {/* right: vertical preview & favourite */}
+                      {/* right: verification, preview & favourite */}
                       <div className="flex flex-col items-center gap-3">
+                        <CheckMeButton
+                          ownerUsername={it.ownerUsername}
+                          ownerUuid={it.ownerUuid}
+                          targets={setPieceList(it).map((p) => ({ uuid: p.uuid, name: p.name, color: p.color }))}
+                        />
                         <VerticalSetPreview s={it} />
                         <button
                           onClick={()=>toggleFav(it)}

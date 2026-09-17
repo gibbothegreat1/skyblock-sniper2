@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "../../../lib/db";
+import { deltaE2000 } from "../../../lib/colorDistance";
+import { getNonExoticHexType } from "../../../lib/nonExoticHexes";
 
 export const runtime = "nodejs";
 
@@ -54,20 +56,6 @@ function requiresHelmet(setQuery: string): boolean {
   return !/dragon/i.test(setQuery || "");
 }
 
-// XxXxXx nibble weights for #RRGGBB (max distance 405)
-const NIBBLE_WEIGHTS = [8, 1, 8, 1, 8, 1];
-function nibbleDistance(aHex: string, bHex: string): number {
-  const a = aHex.slice(1).toUpperCase();
-  const b = bHex.slice(1).toUpperCase();
-  let total = 0;
-  for (let i = 0; i < 6; i++) {
-    const ai = parseInt(a[i], 16);
-    const bi = parseInt(b[i], 16);
-    total += NIBBLE_WEIGHTS[i] * Math.abs(ai - bi);
-  }
-  return total;
-}
-
 async function resolveUsername(uuidMaybeDashed?: string | null): Promise<string | null> {
   if (!uuidMaybeDashed) return null;
   const uuid = uuidMaybeDashed.replace(/-/g, "").toLowerCase();
@@ -117,8 +105,10 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const qRaw       = (searchParams.get("q") || "").trim();          // set keywords
     const color      = (searchParams.get("color") || "").trim();      // target hex
-    const tolerance  = Math.max(0, Math.min(405, parseInt(searchParams.get("tolerance") || "0", 10) || 0));
-    const exactGroup = (searchParams.get("exactGroup") || "0") === "1"; // new: require all pieces share same hex
+    const tolerance  = Math.max(0, Math.min(100, parseFloat(searchParams.get("tolerance") || "0") || 0));
+    const exactGroup = (searchParams.get("exactGroup") || "0") === "1"; // require all pieces share same hex
+    const includeFairy = searchParams.get("includeFairy") === "1";
+    const includeCrystal = searchParams.get("includeCrystal") === "1";
     const limit      = Math.min(Math.max(parseInt(searchParams.get("limit") || "24", 10) || 24, 1), 100);
     const page       = Math.max(parseInt(searchParams.get("page") || "1", 10) || 1, 1);
     const offset     = (page - 1) * limit;
@@ -190,7 +180,11 @@ export async function GET(req: Request) {
       const itemHex = normalizeHex(r.color || "");
       if (!itemHex) continue;
 
-      const dist = nibbleDistance(itemHex, hex);
+      const hexType = getNonExoticHexType(itemHex);
+      if (hexType === "fairy" && !includeFairy) continue;
+      if (hexType === "crystal" && !includeCrystal) continue;
+
+      const dist = deltaE2000(itemHex, hex);
       if (tolerance === 0) {
         if (dist !== 0) continue;
       } else {
@@ -247,29 +241,28 @@ export async function GET(req: Request) {
       completed.push({ ...g, isExact, avgDist, maxDist });
     }
 
-    // Resolve usernames
-    const owners = Array.from(new Set(completed.map(g => g.ownerUuid!).filter(Boolean))).slice(0, 50);
+    // Sort by visual distance before pagination. Resolve usernames only for the
+    // visible page so Vercel does not make dozens of third-party requests.
+    completed.sort((a, b) => {
+      if (a.isExact !== b.isExact) return a.isExact ? -1 : 1;
+      if (a.avgDist !== b.avgDist) return a.avgDist - b.avgDist;
+      return (a.ownerUuid || "").localeCompare(b.ownerUuid || "");
+    });
+
+    const total = completed.length;
+    const totalPages = total ? Math.max(1, Math.ceil(total / limit)) : 0;
+    const pageGroups = completed.slice(offset, offset + limit);
+    const owners = Array.from(new Set(pageGroups.map(g => g.ownerUuid!).filter(Boolean)));
     const nameMap = new Map<string, string | null>();
     await Promise.all(owners.map(async (u) => nameMap.set(u, await resolveUsername(u))));
-    for (const g of completed) {
+    for (const g of pageGroups) {
       if (g.ownerUuid && nameMap.has(g.ownerUuid)) {
         g.ownerUsername = nameMap.get(g.ownerUuid) || null;
         if (g.ownerUsername) g.ownerPlanckeUrl = `https://plancke.io/hypixel/player/stats/${g.ownerUsername}`;
       }
     }
 
-    // Sort: exact first, then avgDist, then owner
-    completed.sort((a, b) => {
-      if (a.isExact !== b.isExact) return a.isExact ? -1 : 1;
-      if (a.avgDist !== b.avgDist) return a.avgDist - b.avgDist;
-      const au = a.ownerUsername || a.ownerUuid || "";
-      const bu = b.ownerUsername || b.ownerUuid || "";
-      return au.localeCompare(bu);
-    });
-
-    const total = completed.length;
-    const totalPages = total ? Math.max(1, Math.ceil(total / limit)) : 0;
-    const slice = completed.slice(offset, offset + limit).map(g => ({
+    const slice = pageGroups.map(g => ({
       setLabel: g.setLabel,
       color: g.color,
       rarity: g.rarity || null,
@@ -280,12 +273,12 @@ export async function GET(req: Request) {
       ownerPlanckeUrl: g.ownerPlanckeUrl,
       ownerSkyCryptUrl: g.ownerSkyCryptUrl,
       isExact: g.isExact,
-      avgDist: Math.round(g.avgDist),
+      avgDist: Math.round(g.avgDist * 100) / 100,
       pieces: {
-        helmet: g.pieces.helmet ? { uuid: g.pieces.helmet.uuid, name: g.pieces.helmet.name, color: g.pieces.helmet.normHex } : null,
-        chestplate: g.pieces.chestplate ? { uuid: g.pieces.chestplate.uuid, name: g.pieces.chestplate.name, color: g.pieces.chestplate.normHex } : null,
-        leggings: g.pieces.leggings ? { uuid: g.pieces.leggings.uuid, name: g.pieces.leggings.name, color: g.pieces.leggings.normHex } : null,
-        boots: g.pieces.boots ? { uuid: g.pieces.boots.uuid, name: g.pieces.boots.name, color: g.pieces.boots.normHex } : null,
+        helmet: g.pieces.helmet ? { uuid: g.pieces.helmet.uuid, name: g.pieces.helmet.name, color: g.pieces.helmet.normHex, hexType: getNonExoticHexType(g.pieces.helmet.normHex) } : null,
+        chestplate: g.pieces.chestplate ? { uuid: g.pieces.chestplate.uuid, name: g.pieces.chestplate.name, color: g.pieces.chestplate.normHex, hexType: getNonExoticHexType(g.pieces.chestplate.normHex) } : null,
+        leggings: g.pieces.leggings ? { uuid: g.pieces.leggings.uuid, name: g.pieces.leggings.name, color: g.pieces.leggings.normHex, hexType: getNonExoticHexType(g.pieces.leggings.normHex) } : null,
+        boots: g.pieces.boots ? { uuid: g.pieces.boots.uuid, name: g.pieces.boots.name, color: g.pieces.boots.normHex, hexType: getNonExoticHexType(g.pieces.boots.normHex) } : null,
       },
     }));
 
@@ -299,6 +292,8 @@ export async function GET(req: Request) {
       targetHex: hex,
       tolerance,
       exactGroup,
+      filters: { includeFairy, includeCrystal },
+      distanceMetric: "CIEDE2000",
       requiresHelmet: wantHelmet,
     });
   } catch (err: any) {

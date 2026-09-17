@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import { deltaE2000 } from "../../../lib/colorDistance";
+import { getNonExoticHexType } from "../../../lib/nonExoticHexes";
 
 /* ---------- Types ---------- */
 type RawRow = Record<string, string>;
@@ -16,6 +18,9 @@ type ItemOut = {
   ownerMcuuidUrl: string | null;
   ownerPlanckeUrl: string | null;
   ownerSkyCryptUrl: string | null;
+  hexType: "fairy" | "crystal" | null;
+  isExotic: boolean;
+  deltaE: number | null;
 };
 
 type ItemWithRaw = ItemOut & { __raw: RawRow };
@@ -26,12 +31,6 @@ const normalizeHex = (h?: string | null) => {
   const x = h.replace(/^#/, "").trim().toLowerCase();
   return /^[0-9a-f]{6}$/.test(x) ? `#${x}` : null;
 };
-const hexToRgb = (hex: string) => {
-  const x = hex.replace("#", "");
-  return [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16)] as [number, number, number];
-};
-const rgbDist = (a: [number, number, number], b: [number, number, number]) =>
-  Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]); // 0..765
 const cryptoRandomId = () => "old_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
 
 function getCsvPath(): string | null {
@@ -140,6 +139,9 @@ function mapRow(row: RawRow): ItemWithRaw {
     ownerSkyCryptUrl: ownerUuid
       ? `https://sky.shiiyu.moe/stats/${ownerUuid}${ownerProfile ? `/${ownerProfile}` : ""}`
       : null,
+    hexType: getNonExoticHexType(normalizeHex(row["color_hex"]) ?? normalizeHex(row["colour"])),
+    isExotic: getNonExoticHexType(normalizeHex(row["color_hex"]) ?? normalizeHex(row["colour"])) === null,
+    deltaE: null,
     __raw: row,
   };
   return out;
@@ -151,7 +153,9 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
     const color = normalizeHex(url.searchParams.get("color"));
-    const tol = Math.max(0, Math.min(10000, parseInt(url.searchParams.get("tolerance") || "0", 10) || 0));
+    const tol = Math.max(0, Math.min(100, parseFloat(url.searchParams.get("tolerance") || "0") || 0));
+    const includeFairy = url.searchParams.get("includeFairy") === "1";
+    const includeCrystal = url.searchParams.get("includeCrystal") === "1";
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
     const limit = Math.max(1, Math.min(200, parseInt(url.searchParams.get("limit") || "24", 10)));
 
@@ -177,38 +181,40 @@ export async function GET(req: Request) {
       });
     }
 
+    // Hide known non-exotic colours unless explicitly included.
+    items = items.filter((it) => {
+      if (it.hexType === "fairy" && !includeFairy) return false;
+      if (it.hexType === "crystal" && !includeCrystal) return false;
+      return true;
+    });
+
     // 🎯 optional color filter
     if (color) {
-      const target = hexToRgb(color);
-      items = items.filter((it) => it.color && rgbDist(hexToRgb(it.color), target) <= tol);
+      items = items
+        .map((it) => ({ ...it, deltaE: it.color ? Math.round(deltaE2000(it.color, color) * 100) / 100 : null }))
+        .filter((it) => it.deltaE !== null && it.deltaE <= tol)
+        .sort((a, b) => (a.deltaE ?? 999999) - (b.deltaE ?? 999999));
     }
 
-    // 🧭 resolve usernames for distinct UUIDs (where missing)
-    const uuids = Array.from(
-      new Set(items.map((it) => it.ownerUuid).filter(Boolean) as string[])
-    );
+    // Paginate before external username lookups so one request never fans out
+    // across the whole legacy dataset.
+    const total = items.length;
+    const totalPages = total ? Math.max(1, Math.ceil(total / limit)) : 0;
+    const start = (page - 1) * limit;
+    const pageItems = items.slice(start, start + limit);
+
+    const uuids = Array.from(new Set(pageItems.map((it) => it.ownerUuid).filter(Boolean) as string[]));
     const nameMap = new Map<string, string | null>();
-    await Promise.all(
-      uuids.map(async (u) => {
-        const name = await resolveUsername(u);
-        nameMap.set(u, name);
-      })
-    );
-    items.forEach((it) => {
+    await Promise.all(uuids.map(async (u) => nameMap.set(u, await resolveUsername(u))));
+    pageItems.forEach((it) => {
       if (it.ownerUuid && !it.ownerUsername) {
         const n = nameMap.get(it.ownerUuid) || null;
         if (n) it.ownerUsername = n;
       }
     });
 
-    // output
-    const itemsOut: ItemOut[] = items.map(({ __raw, ...rest }) => rest);
-    const total = itemsOut.length;
-    const totalPages = Math.max(1, Math.ceil(total / limit));
-    const start = (page - 1) * limit;
-    const paged = itemsOut.slice(start, start + limit);
-
-    return NextResponse.json({ ok: true, page, limit, total, totalPages, items: paged });
+    const paged: ItemOut[] = pageItems.map(({ __raw, ...rest }) => rest);
+    return NextResponse.json({ ok: true, page, limit, total, totalPages, items: paged, distanceMetric: "CIEDE2000", filters: { includeFairy, includeCrystal } });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || String(e) }, { status: 500 });
   }

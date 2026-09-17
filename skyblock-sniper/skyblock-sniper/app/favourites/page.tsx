@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import SiteChrome from "../components/SiteChrome";
+import CheckMeButton from "../components/CheckMeButton";
+import NonExoticToggles from "../components/NonExoticToggles";
+import { getNonExoticHexType } from "../../lib/nonExoticHexes";
+import { ArmourPiece } from "../components/ArmourPiece";
 
 /* =========================================
    Types (matches what you store in LS)
@@ -29,10 +33,26 @@ type SetItem = {
   };
 };
 
+type ItemFav = {
+  uuid: string;
+  name: string;
+  color?: string | null;
+  rarity?: string | null;
+  reforge?: string | null;
+  hexType?: "fairy" | "crystal" | null;
+  ownerUuid?: string | null;
+  ownerUsername?: string | null;
+  ownerAvatarUrl?: string | null;
+  ownerMcuuidUrl?: string | null;
+  ownerPlanckeUrl?: string | null;
+  ownerSkyCryptUrl?: string | null;
+};
+
 /* =========================================
    Constants (same as Sets page)
    ========================================= */
 const LS_SETS = "gibbo-fav-sets";
+const LS_ITEMS = "gibbo-fav-items";
 
 const ARMOUR_DIR = "/images/armor";
 const ICONS_DIR = "/images/set-icons";
@@ -117,6 +137,12 @@ function computeSetDisplayHex(s: SetItem): string | null {
   const avg: [number,number,number] = [sum[0]/cols.length, sum[1]/cols.length, sum[2]/cols.length];
   return rgbToHex(avg[0], avg[1], avg[2]);
 }
+
+function setPieceList(s: SetItem): PieceEntry[] {
+  return [s.pieces.helmet, s.pieces.chestplate, s.pieces.leggings, s.pieces.boots]
+    .filter((piece): piece is PieceEntry => Boolean(piece));
+}
+
 function inferDragonKey(setLabel: string) {
   const m = setLabel.toLowerCase().match(/\b(superior|wise|unstable|strong|young|old|protector|holy)\b/);
   return m ? m[1] : null;
@@ -355,15 +381,55 @@ function saveFavs(list: SetItem[]) {
   try { localStorage.setItem(LS_SETS, JSON.stringify(list)); } catch {}
 }
 
+
+function inferPieceFromName(name?: string | null): "helmet" | "chestplate" | "leggings" | "boots" | null {
+  if (!name) return null;
+  const n = name.toLowerCase();
+  if (/\b(helm|helmet|mask|cap)\b/.test(n)) return "helmet";
+  if (/\b(chest|chestplate|torso|tunic|plate)\b/.test(n)) return "chestplate";
+  if (/\b(leg|legging|leggings|pants|trouser)\b/.test(n)) return "leggings";
+  if (/\b(boot|boots|shoe|shoes|greave)\b/.test(n)) return "boots";
+  return null;
+}
+
+function loadItemFavs(): ItemFav[] {
+  try {
+    const raw = localStorage.getItem(LS_ITEMS);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+function saveItemFavs(list: ItemFav[]) {
+  try { localStorage.setItem(LS_ITEMS, JSON.stringify(list)); } catch {}
+}
+
 /* =========================================
    Page
    ========================================= */
 export default function FavouritesPage() {
   const [items, setItems] = useState<SetItem[]>([]);
+  const [itemFavs, setItemFavs] = useState<ItemFav[]>([]);
+  const [includeFairy, setIncludeFairy] = useState(false);
+  const [includeCrystal, setIncludeCrystal] = useState(false);
 
-  const refresh = () => setItems(loadFavs());
+  const refresh = () => { setItems(loadFavs()); setItemFavs(loadItemFavs()); };
 
   useEffect(() => { refresh(); }, []);
+
+
+  const visibleItems = useMemo(() => items.filter((s) => {
+    const types = setPieceList(s).map((p) => getNonExoticHexType(p.color));
+    if (!includeFairy && types.includes("fairy")) return false;
+    if (!includeCrystal && types.includes("crystal")) return false;
+    return true;
+  }), [items, includeFairy, includeCrystal]);
+
+  const visibleItemFavs = useMemo(() => itemFavs.filter((it) => {
+    const type = it.hexType ?? getNonExoticHexType(it.color);
+    if (type === "fairy" && !includeFairy) return false;
+    if (type === "crystal" && !includeCrystal) return false;
+    return true;
+  }), [itemFavs, includeFairy, includeCrystal]);
 
   const remove = (favKey?: string) => {
     if (!favKey) return;
@@ -372,109 +438,143 @@ export default function FavouritesPage() {
     setItems(next);
   };
 
+  const removeItem = (uuid: string) => {
+    const next = loadItemFavs().filter((f) => f.uuid !== uuid);
+    saveItemFavs(next);
+    setItemFavs(next);
+  };
+
   return (
     <div className="site-shell">
       <SiteChrome
         title="Gibbo's Exotics — Favourites"
-        subtitle="Keep your saved exotic sets together in the same clean collection view."
+        subtitle="Keep saved exotic pieces and complete sets together, with the same Fairy/Crystal filters and live verification."
       />
 
       <main className="content-wrap page-content">
-        {items.length === 0 ? (
-          <div className="theme-banner p-8 text-center text-sm">
-            No favourites yet. Go to the <Link className="underline" href="/sets">Sets</Link> tab and click ★ to add some.
+        <div className="theme-panel p-4 mb-6">
+          <NonExoticToggles compact includeFairy={includeFairy} includeCrystal={includeCrystal} onFairy={setIncludeFairy} onCrystal={setIncludeCrystal} />
+        </div>
+        {(itemFavs.length > 0 || items.length > 0) ? (
+          <div className="space-y-8">
+            {itemFavs.length > 0 && (
+              <section>
+                <div className="results-heading mb-4">
+                  <div><p className="section-kicker">SAVED PIECES</p><h2>Favourite armour</h2></div>
+                  <span className="result-chip">{visibleItemFavs.length} visible</span>
+                </div>
+                {visibleItemFavs.length === 0 ? (
+                  <div className="theme-banner p-6 text-center text-sm">All saved pieces are hidden by the Fairy/Crystal filters.</div>
+                ) : (
+                  <div className="results-grid">
+                    {visibleItemFavs.map((it) => {
+                      const colorHex = normHex(it.color);
+                      const piece = inferPieceFromName(it.name);
+                      const hexType = it.hexType ?? getNonExoticHexType(it.color);
+                      const ownerLabel = it.ownerUsername || (it.ownerUuid ? `${it.ownerUuid.slice(0,8)}…` : "Owner unavailable");
+                      return (
+                        <article className="item-card" key={it.uuid}>
+                          <div className="item-visual">
+                            <div className="colour-orb" style={{ background: colorHex || "#64748b" }} />
+                            {piece && colorHex ? <ArmourPiece piece={piece} hex={colorHex} size={76} /> : <div className="armour-placeholder">?</div>}
+                          </div>
+                          <div className="item-body">
+                            <div className="item-title-row">
+                              <div>
+                                <div className="badge-row">
+                                  {it.rarity && <span className="rarity-badge">{it.rarity}</span>}
+                                  {hexType && <span className={`hex-badge ${hexType}`}>{hexType === "fairy" ? "Fairy hex" : "Crystal hex"}</span>}
+                                  {!hexType && colorHex && <span className="hex-badge exotic">Exotic hex</span>}
+                                </div>
+                                <h3>{it.name}</h3>
+                              </div>
+                              <button className="fav-button saved" onClick={() => removeItem(it.uuid)} aria-label="Remove favourite">★</button>
+                            </div>
+                            <div className="hex-line">
+                              <span className="mini-swatch" style={{ background: colorHex || "#64748b" }} />
+                              <code>{colorHex || "NO HEX"}</code>
+                              {it.reforge && it.reforge !== "Clean" && <span className="reforge">{it.reforge}</span>}
+                            </div>
+                            <div className="owner-row">
+                              <div className="owner-id">
+                                {it.ownerAvatarUrl ? <img src={it.ownerAvatarUrl} width={24} height={24} alt="" /> : <span className="avatar-fallback" />}
+                                <span>{ownerLabel}</span>
+                              </div>
+                              <div className="owner-links">
+                                {it.ownerSkyCryptUrl && <a href={it.ownerSkyCryptUrl} target="_blank" rel="noreferrer">SkyCrypt</a>}
+                                {it.ownerPlanckeUrl && <a href={it.ownerPlanckeUrl} target="_blank" rel="noreferrer">Plancke</a>}
+                                {it.ownerMcuuidUrl && <a href={it.ownerMcuuidUrl} target="_blank" rel="noreferrer">UUID</a>}
+                              </div>
+                            </div>
+                            <CheckMeButton ownerUsername={it.ownerUsername} ownerUuid={it.ownerUuid} target={{ uuid: it.uuid, name: it.name, color: it.color }} />
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {items.length > 0 && (
+              <section>
+                <div className="results-heading mb-4">
+                  <div><p className="section-kicker">SAVED SETS</p><h2>Favourite sets</h2></div>
+                  <span className="result-chip">{visibleItems.length} visible</span>
+                </div>
+                {visibleItems.length === 0 ? (
+                  <div className="theme-banner p-6 text-center text-sm">All saved sets are hidden by the Fairy/Crystal filters.</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {visibleItems.map((s, idx) => {
+                      const favKey = s.favKey ?? `${idx}`;
+                      const displayHex = computeSetDisplayHex(s) || normHex(s.color) || "#888888";
+                      return (
+                        <div key={favKey} className="theme-card p-4">
+                          <div className="flex items-start gap-4">
+                            <div className="flex flex-col items-center gap-1">
+                              <div className="w-10 h-10 rounded-xl ring-1 ring-white/20" style={{ backgroundColor: displayHex || "#888" }} />
+                              <code className="text-[11px] text-slate-200/90">{displayHex}</code>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-semibold truncate text-slate-50">{s.setLabel}</h3>
+                                {s.rarity && <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">{s.rarity}</span>}
+                              </div>
+                              <div className="mt-1 flex items-center gap-2 text-sm">
+                                {s.ownerAvatarUrl && <img src={s.ownerAvatarUrl} width={20} height={20} alt="avatar" className="rounded-md ring-1 ring-white/20" />}
+                                {s.ownerUsername ? <span className="text-slate-100">{s.ownerUsername}</span> : s.ownerUuid ? <span className="text-slate-300/80">{s.ownerUuid.slice(0,8)}…</span> : <span className="text-slate-300/60">No owner</span>}
+                                <div className="ml-auto flex items-center gap-2">
+                                  {s.ownerPlanckeUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={s.ownerPlanckeUrl} target="_blank" rel="noreferrer">Plancke</a>}
+                                  {s.ownerSkyCryptUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={s.ownerSkyCryptUrl} target="_blank" rel="noreferrer">SkyCrypt</a>}
+                                  {s.ownerMcuuidUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={s.ownerMcuuidUrl} target="_blank" rel="noreferrer">MCUUID</a>}
+                                </div>
+                              </div>
+                              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                                {(["chestplate","leggings","boots","helmet"] as const).map((kind) => {
+                                  const piece = s.pieces[kind];
+                                  if (!piece) return null;
+                                  return <div className="theme-piece p-2" key={kind}><div className="text-xs opacity-80">{kind[0].toUpperCase()+kind.slice(1)}</div><div className="font-medium truncate">{piece.name}</div><code className="text-[11px] opacity-90">{normHex(piece.color)}</code></div>;
+                                })}
+                              </div>
+                            </div>
+                            <VerticalSetPreview s={s} />
+                          </div>
+                          <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
+                            <CheckMeButton ownerUsername={s.ownerUsername} ownerUuid={s.ownerUuid} targets={setPieceList(s).map((p) => ({ uuid: p.uuid, name: p.name, color: p.color }))} />
+                            <button onClick={() => remove(s.favKey)} className="px-3 py-1.5 text-sm rounded-xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15" title="Remove from favourites">Remove</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {items.map((s, idx) => {
-              const favKey = s.favKey ?? `${idx}`;
-              const displayHex = computeSetDisplayHex(s) || normHex(s.color) || "#888888";
-
-              return (
-                <div key={favKey} className="theme-card p-4">
-                  <div className="flex items-start gap-4">
-                    {/* swatch */}
-                    <div className="flex flex-col items-center gap-1">
-                      <div className="w-10 h-10 rounded-xl ring-1 ring-white/20" style={{ backgroundColor: displayHex || "#888" }} />
-                      <code className="text-[11px] text-slate-200/90">{displayHex}</code>
-                    </div>
-
-                    {/* info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-semibold truncate text-slate-50">{s.setLabel}</h3>
-                        {s.rarity && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">{s.rarity}</span>
-                        )}
-                      </div>
-
-                      {/* owner */}
-                      <div className="mt-1 flex items-center gap-2 text-sm">
-                        {s.ownerAvatarUrl && <img src={s.ownerAvatarUrl} width={20} height={20} alt="avatar" className="rounded-md ring-1 ring-white/20" />}
-                        {s.ownerUsername ? (
-                          <span className="text-slate-100">{s.ownerUsername}</span>
-                        ) : s.ownerUuid ? (
-                          <span className="text-slate-300/80">{s.ownerUuid.slice(0,8)}…</span>
-                        ) : (
-                          <span className="text-slate-300/60">No owner</span>
-                        )}
-                        <div className="ml-auto flex items-center gap-2">
-                          {s.ownerPlanckeUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={s.ownerPlanckeUrl} target="_blank" rel="noreferrer">Plancke</a>}
-                          {s.ownerSkyCryptUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={s.ownerSkyCryptUrl} target="_blank" rel="noreferrer">SkyCrypt</a>}
-                          {s.ownerMcuuidUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={s.ownerMcuuidUrl} target="_blank" rel="noreferrer">MCUUID</a>}
-                        </div>
-                      </div>
-
-                      {/* piece metadata */}
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                        {s.pieces.chestplate && (
-                          <div className="theme-piece p-2">
-                            <div className="text-xs opacity-80">Chestplate</div>
-                            <div className="font-medium truncate">{s.pieces.chestplate.name}</div>
-                            <code className="text-[11px] opacity-90">{normHex(s.pieces.chestplate.color)}</code>
-                          </div>
-                        )}
-                        {s.pieces.leggings && (
-                          <div className="theme-piece p-2">
-                            <div className="text-xs opacity-80">Leggings</div>
-                            <div className="font-medium truncate">{s.pieces.leggings.name}</div>
-                            <code className="text-[11px] opacity-90">{normHex(s.pieces.leggings.color)}</code>
-                          </div>
-                        )}
-                        {s.pieces.boots && (
-                          <div className="theme-piece p-2">
-                            <div className="text-xs opacity-80">Boots</div>
-                            <div className="font-medium truncate">{s.pieces.boots.name}</div>
-                            <code className="text-[11px] opacity-90">{normHex(s.pieces.boots.color)}</code>
-                          </div>
-                        )}
-                        {s.pieces.helmet && (
-                          <div className="theme-piece p-2">
-                            <div className="text-xs opacity-80">Helmet</div>
-                            <div className="font-medium truncate">{s.pieces.helmet.name}</div>
-                            <code className="text-[11px] opacity-90">{normHex(s.pieces.helmet.color)}</code>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* right: vertical set preview */}
-                    <VerticalSetPreview s={s} />
-                  </div>
-
-                  {/* footer: remove */}
-                  <div className="mt-3 text-right">
-                    <button
-                      onClick={() => remove(s.favKey)}
-                      className="px-3 py-1.5 text-sm rounded-xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15"
-                      title="Remove from favourites"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="theme-banner p-8 text-center text-sm">
+            No favourites yet. Save individual pieces from <Link className="underline" href="/">All Items</Link> or complete sets from <Link className="underline" href="/sets">Sets</Link>.
           </div>
         )}
       </main>

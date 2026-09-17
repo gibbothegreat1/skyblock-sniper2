@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import SiteChrome from "../components/SiteChrome";
+import CheckMeButton from "../components/CheckMeButton";
+import NonExoticToggles from "../components/NonExoticToggles";
 
 /* ===== Types matching the API ===== */
 type OwnerBits = {
@@ -18,6 +20,9 @@ type ItemEntry = OwnerBits & {
   name: string;
   color?: string | null;
   rarity?: string | null;
+  hexType?: "fairy" | "crystal" | null;
+  isExotic?: boolean;
+  deltaE?: number | null;
 };
 type ApiResp = {
   ok: boolean;
@@ -30,7 +35,7 @@ type ApiResp = {
 };
 
 /* ===== UI constants / helpers ===== */
-const MAX_TOL = 405;
+const MAX_TOL = 100;
 const ARMOUR_DIR = "/images/armor";
 
 const normHex = (h?: string | null) => {
@@ -262,6 +267,8 @@ export default function OldDragonPiecesPage() {
   const [q, setQ] = useState("");
   const [hex, setHex] = useState("");
   const [tolerance, setTolerance] = useState(0);
+  const [includeFairy, setIncludeFairy] = useState(false);
+  const [includeCrystal, setIncludeCrystal] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(24);
 
@@ -278,10 +285,12 @@ export default function OldDragonPiecesPage() {
     if (q.trim()) usp.set("q", q.trim());
     if (hex.trim()) usp.set("color", hex.trim());
     if (tolerance > 0) usp.set("tolerance", String(tolerance));
+    if (includeFairy) usp.set("includeFairy", "1");
+    if (includeCrystal) usp.set("includeCrystal", "1");
     return `/api/old?${usp.toString()}`;
-  }, [q, hex, page, limit, tolerance]);
+  }, [q, hex, page, limit, tolerance, includeFairy, includeCrystal]);
 
-  useEffect(() => { setPage(1); }, [q, hex, limit, tolerance]);
+  useEffect(() => { setPage(1); }, [q, hex, limit, tolerance, includeFairy, includeCrystal]);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,7 +316,7 @@ export default function OldDragonPiecesPage() {
     <div className="site-shell">
       <SiteChrome
         title="Gibbo's Exotics — Old Dragon"
-        subtitle="Browse Old Dragon pieces by item name, colour and nearby hex tolerance."
+        subtitle="Browse Old Dragon pieces by item name and perceptual CIEDE2000 (ΔE) colour distance."
       />
 
       <main className="content-wrap page-content">
@@ -331,10 +340,13 @@ export default function OldDragonPiecesPage() {
 
           <div className="theme-subpanel lg:col-span-1 p-3">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-cyan-200/80">Nearby tolerance</span>
-              <code className="text-[10px] text-cyan-200/90">tol: {tolerance}</code>
+              <span className="text-xs text-cyan-200/80">Visual tolerance (ΔE)</span>
+              <code className="text-[10px] text-cyan-200/90">ΔE {tolerance}</code>
             </div>
             <input type="range" min={0} max={MAX_TOL} step={1} value={tolerance} onChange={e=>setTolerance(parseInt(e.target.value,10))} className="w-full accent-cyan-300" />
+          </div>
+          <div className="lg:col-span-5">
+            <NonExoticToggles compact includeFairy={includeFairy} includeCrystal={includeCrystal} onFairy={setIncludeFairy} onCrystal={setIncludeCrystal} />
           </div>
         </div>
 
@@ -367,6 +379,8 @@ export default function OldDragonPiecesPage() {
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold truncate text-slate-50">{it.name}</h3>
                           {it.rarity && <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 ring-1 ring-white/15 text-slate-100">{it.rarity}</span>}
+                          {it.hexType && <span className={`hex-badge ${it.hexType}`}>{it.hexType === "fairy" ? "Fairy hex" : "Crystal hex"}</span>}
+                          {!it.hexType && colorHex && <span className="hex-badge exotic">Exotic hex</span>}
                         </div>
 
                         {/* owner */}
@@ -385,6 +399,8 @@ export default function OldDragonPiecesPage() {
                             {it.ownerMcuuidUrl && <a className="text-xs underline decoration-cyan-300/60 hover:decoration-cyan-300" href={it.ownerMcuuidUrl} target="_blank" rel="noreferrer">MCUUID</a>}
                           </div>
                         </div>
+                        {typeof it.deltaE === "number" && <div className="mt-2"><span className="delta-badge">ΔE {it.deltaE.toFixed(2)}</span></div>}
+                        <CheckMeButton ownerUsername={it.ownerUsername} ownerUuid={it.ownerUuid} target={{ uuid: it.uuid, name: it.name, color: it.color }} />
                       </div>
 
                       {/* right: single armour sprite */}

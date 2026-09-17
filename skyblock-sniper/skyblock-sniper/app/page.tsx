@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArmourPiece } from "./components/ArmourPiece";
+import CheckMeButton from "./components/CheckMeButton";
 
 type OwnerBits = {
   ownerUuid?: string | null;
@@ -21,6 +22,7 @@ type ItemEntry = OwnerBits & {
   reforge?: string | null;
   hexType?: "fairy" | "crystal" | null;
   isExotic?: boolean;
+  deltaE?: number | null;
 };
 
 type ApiResp = {
@@ -43,7 +45,7 @@ type SearchState = {
 };
 
 const LS_ITEM_FAVS = "gibbo-fav-items";
-const MAX_TOL = 405;
+const MAX_TOL = 100;
 
 function loadItemFavs(): ItemEntry[] {
   try {
@@ -210,7 +212,7 @@ export default function ItemsPage() {
         <div>
           <p className="eyebrow">HYPIXEL SKYBLOCK EXOTICS DATABASE</p>
           <h1>Gibbo&apos;s Exotics</h1>
-          <p className="header-copy">Search armour by name and colour, compare nearby hexes, and separate true exotics from known Fairy and Crystal colours.</p>
+          <p className="header-copy">Search armour by name and colour, rank nearby hexes by CIEDE2000 (ΔE), and separate true exotics from known Fairy and Crystal colours.</p>
         </div>
       </header>
 
@@ -265,10 +267,10 @@ export default function ItemsPage() {
             <div className="tolerance-card">
               <div className="tolerance-heading">
                 <div>
-                  <strong>Nearby colour tolerance</strong>
-                  <span>0 = exact hex only</span>
+                  <strong>Visual colour tolerance (ΔE)</strong>
+                  <span>CIEDE2000 • 0 = exact • lower = closer</span>
                 </div>
-                <code>{draft.tolerance}</code>
+                <code>ΔE {draft.tolerance}</code>
               </div>
               <input
                 type="range"
@@ -359,6 +361,7 @@ export default function ItemsPage() {
                         <span className="mini-swatch" style={{ background: colorHex || "#64748b" }} />
                         <code>{colorHex || "NO HEX"}</code>
                         {it.reforge && it.reforge !== "Clean" && <span className="reforge">{it.reforge}</span>}
+                        {typeof it.deltaE === "number" && <span className="delta-badge">ΔE {it.deltaE.toFixed(2)}</span>}
                       </div>
 
                       <div className="owner-row">
@@ -372,6 +375,12 @@ export default function ItemsPage() {
                           {it.ownerMcuuidUrl && <a href={it.ownerMcuuidUrl} target="_blank" rel="noreferrer">UUID</a>}
                         </div>
                       </div>
+
+                      <CheckMeButton
+                        ownerUsername={it.ownerUsername}
+                        ownerUuid={it.ownerUuid}
+                        target={{ uuid: it.uuid, name: it.name, color: it.color }}
+                      />
                     </div>
                   </article>
                 );

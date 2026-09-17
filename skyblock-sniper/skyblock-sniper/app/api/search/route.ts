@@ -6,6 +6,7 @@ import {
   getNonExoticHexType,
   normalizeHexForLookup,
 } from "../../../lib/nonExoticHexes";
+import { deltaE2000 } from "../../../lib/colorDistance";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -50,6 +51,7 @@ type Out = {
   ownerSkyCryptUrl: string | null;
   hexType: "fairy" | "crystal" | null;
   isExotic: boolean;
+  deltaE: number | null;
 };
 
 async function resolveUsername(uuidMaybeDashed?: string | null): Promise<string | null> {
@@ -123,7 +125,7 @@ export async function GET(req: Request) {
     const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "24", 10) || 24, 1), 100);
     const page = Math.max(parseInt(searchParams.get("page") || "1", 10) || 1, 1);
     const offset = (page - 1) * limit;
-    const tolerance = Math.max(0, Math.min(405, parseInt(searchParams.get("tolerance") || "0", 10) || 0));
+    const tolerance = Math.max(0, Math.min(100, parseFloat(searchParams.get("tolerance") || "0") || 0));
     const hex = normalizeHexForLookup(colorRaw);
 
     if (colorRaw && !hex) {
@@ -173,7 +175,7 @@ export async function GET(req: Request) {
         where.push("UPPER(color) = ?");
         args.push(hex);
       } else {
-        where.push("nibble_distance(color, ?) <= ?");
+        where.push("delta_e(color, ?) <= ?");
         args.push(hex, tolerance);
       }
     }
@@ -185,7 +187,7 @@ export async function GET(req: Request) {
       .get(...args) as { c: number };
 
     const orderSQL = hex && tolerance > 0
-      ? "ORDER BY nibble_distance(color, ?) ASC, name COLLATE NOCASE ASC"
+      ? "ORDER BY delta_e(color, ?) ASC, name COLLATE NOCASE ASC"
       : "ORDER BY name COLLATE NOCASE ASC";
     const orderArgs = hex && tolerance > 0 ? [hex] : [];
 
@@ -199,7 +201,7 @@ export async function GET(req: Request) {
       )
       .all(...args, ...orderArgs, limit, offset) as Row[];
 
-    const out = await decorate(rows);
+    const out = await decorate(rows, hex);
     const total = countRow?.c ?? 0;
     const totalPages = total ? Math.ceil(total / limit) : 0;
 
@@ -213,6 +215,7 @@ export async function GET(req: Request) {
       targetHex: hex,
       tolerance,
       filters: { includeFairy, includeCrystal },
+      distanceMetric: "CIEDE2000",
     });
   } catch (err) {
     console.error("/api/search failed:", err);
@@ -223,7 +226,7 @@ export async function GET(req: Request) {
   }
 }
 
-async function decorate(rows: Row[]): Promise<Out[]> {
+async function decorate(rows: Row[], targetHex: string | null): Promise<Out[]> {
   const owners = new Set<string>();
   const out: Out[] = rows.map((r) => {
     let ownerUuid: string | null = null;
@@ -256,6 +259,7 @@ async function decorate(rows: Row[]): Promise<Out[]> {
       ownerSkyCryptUrl: ownerUuid ? `https://sky.shiiyu.moe/stats/${ownerUuidFlat}` : null,
       hexType,
       isExotic: hexType === null,
+      deltaE: targetHex ? Math.round(deltaE2000(r.color, targetHex) * 100) / 100 : null,
     };
   });
 

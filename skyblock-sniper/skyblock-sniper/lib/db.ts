@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import { deltaE2000 } from "./colorDistance";
 
 export const dbPath = path.join(process.cwd(), "data", "skyblock.db");
 
@@ -34,25 +35,10 @@ export const db = new Database(dbPath, {
   fileMustExist: true,
 });
 
-// Custom SQLite scalar function used by nearby-colour search. Keeping the
-// distance calculation inside SQLite means we do not load hundreds of
-// thousands of rows into Node memory just to sort them.
-const NIBBLE_WEIGHTS = [8, 1, 8, 1, 8, 1];
-function cleanHex(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const s = value.trim().replace(/^#/, "").toUpperCase();
-  return /^[0-9A-F]{6}$/.test(s) ? s : null;
-}
-
-db.function("nibble_distance", { deterministic: true }, (a: unknown, b: unknown) => {
-  const aa = cleanHex(a);
-  const bb = cleanHex(b);
-  if (!aa || !bb) return 999999;
-  let total = 0;
-  for (let i = 0; i < 6; i++) {
-    total += NIBBLE_WEIGHTS[i] * Math.abs(parseInt(aa[i], 16) - parseInt(bb[i], 16));
-  }
-  return total;
+// Custom SQLite scalar function used by nearby-colour search. CIEDE2000 is a
+// perceptual metric: lower ΔE means the colours look more similar to a human.
+db.function("delta_e", { deterministic: true }, (a: unknown, b: unknown) => {
+  return deltaE2000(typeof a === "string" ? a : null, typeof b === "string" ? b : null);
 });
 
 if (!READONLY) {
