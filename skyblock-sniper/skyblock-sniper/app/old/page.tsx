@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import SiteChrome from "../components/SiteChrome";
 
 /* ===== Types matching the API ===== */
 type OwnerBits = {
@@ -303,22 +304,15 @@ export default function OldDragonPiecesPage() {
   }, [apiUrl]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
-      <header className="py-10 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
-          Gibbo&apos;s Exo&apos;s — Old Dragon Pieces
-        </h1>
-        <div className="mt-4 flex gap-3 justify-center">
-          <Link href="/" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">All Items</Link>
-          <Link href="/sets" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">Sets</Link>
-          <Link href="/favourites" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">Favourites</Link>
-          <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">Old Dragon</span>
-        </div>
-      </header>
+    <div className="site-shell">
+      <SiteChrome
+        title="Gibbo's Exotics — Old Dragon"
+        subtitle="Browse Old Dragon pieces by item name, colour and nearby hex tolerance."
+      />
 
-      <main className="max-w-6xl mx-auto px-4 pb-16">
+      <main className="content-wrap page-content">
         {/* Filters */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
+        <div className="theme-panel p-4 grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
           <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
             <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Item name (e.g. Old Dragon Helmet)" className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md" />
             <input value={hex} onChange={e=>setHex(e.target.value)} placeholder="Hex (e.g. 191919 or #191919)" className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md" />
@@ -331,11 +325,11 @@ export default function OldDragonPiecesPage() {
               </select>
             </div>
             <div className="flex items-end">
-              <button onClick={()=>setPage(1)} className="w-full px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 backdrop-blur-md">Search</button>
+              <button onClick={()=>setPage(1)} className="theme-button theme-primary w-full px-4 py-2">Search</button>
             </div>
           </div>
 
-          <div className="lg:col-span-1 rounded-2xl bg-white/10 ring-1 ring-white/10 p-3 backdrop-blur-md">
+          <div className="theme-subpanel lg:col-span-1 p-3">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-cyan-200/80">Nearby tolerance</span>
               <code className="text-[10px] text-cyan-200/90">tol: {tolerance}</code>
@@ -345,9 +339,9 @@ export default function OldDragonPiecesPage() {
         </div>
 
         {/* Messages */}
-        {err && <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">{err}</div>}
+        {err && <div className="theme-error p-3 mb-4">{err}</div>}
         {(!q.trim() && !hex.trim()) && (
-          <div className="p-4 mb-4 rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl text-center text-sm text-slate-200/90">
+          <div className="theme-banner p-4 mb-4 text-center text-sm">
             Tip: enter an <strong>item name</strong> or a <strong>hex</strong> to filter.
           </div>
         )}
@@ -360,7 +354,7 @@ export default function OldDragonPiecesPage() {
                 const piece = inferPieceFromName(it.name);
                 const colorHex = normHex(it.color);
                 return (
-                  <div key={it.uuid} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
+                  <div key={it.uuid} className="theme-card p-4">
                     <div className="flex items-start gap-4">
                       {/* colour swatch */}
                       <div className="flex flex-col items-center gap-1">
@@ -407,10 +401,10 @@ export default function OldDragonPiecesPage() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="mt-8 flex items-center justify-center gap-3">
-                <button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))} className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md">Prev</button>
+              <div className="theme-pagination mt-8 flex items-center justify-center gap-3">
+                <button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))} className="theme-button px-4 py-2">Prev</button>
                 <span className="text-sm text-slate-200/90">Page {page} / {totalPages} • {total} items</span>
-                <button disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))} className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md">Next</button>
+                <button disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))} className="theme-button px-4 py-2">Next</button>
               </div>
             )}
           </>

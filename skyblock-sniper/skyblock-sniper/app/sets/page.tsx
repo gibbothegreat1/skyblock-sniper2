@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import SiteChrome from "../components/SiteChrome";
 
 /* =========================================
    Types
@@ -441,23 +442,15 @@ export default function SetsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
-      <header className="py-10 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
-          Gibbo&apos;s Exo&apos;s — Sets
-        </h1>
-        <p className="mt-2 text-sm text-cyan-200/80">Search complete sets by hex + set name (per owner)</p>
+    <div className="site-shell">
+      <SiteChrome
+        title="Gibbo's Exotics — Sets"
+        subtitle="Find complete armour sets owned by the same player and compare exact or nearby colours."
+      />
 
-        <div className="mt-4 flex gap-3 justify-center">
-          <Link href="/" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">All Items</Link>
-          <Link href="/favourites" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">Favourites</Link>
-          <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">Sets</span>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-4 pb-16">
+      <main className="content-wrap page-content">
         {/* Filters */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
+        <div className="theme-panel p-4 grid grid-cols-1 lg:grid-cols-5 gap-4 mb-8">
           <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
             <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Set name (e.g. Wise Dragon, Farm Suit)" className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md" />
             <input value={hex} onChange={e=>setHex(e.target.value)} placeholder="Exact hex (e.g. 191919 or #191919)" className="px-3 py-1.5 text-sm rounded-2xl bg-white/10 ring-1 ring-white/10 placeholder:text-slate-300/70 focus:outline-none focus:ring-2 focus:ring-cyan-300/40 backdrop-blur-md" />
@@ -470,11 +463,11 @@ export default function SetsPage() {
               </select>
             </div>
             <div className="flex items-end">
-              <button onClick={()=>setPage(1)} className="w-full px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 backdrop-blur-md">Search</button>
+              <button onClick={()=>setPage(1)} className="theme-button theme-primary w-full px-4 py-2">Search</button>
             </div>
           </div>
 
-          <div className="lg:col-span-1 rounded-2xl bg-white/10 ring-1 ring-white/10 p-3 backdrop-blur-md">
+          <div className="theme-subpanel lg:col-span-1 p-3">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-cyan-200/80">Nearby tolerance</span>
               <code className="text-[10px] text-cyan-200/90">tol: {tolerance}</code>
@@ -488,13 +481,13 @@ export default function SetsPage() {
 
         {/* Guidance & Errors */}
         {!hex.trim() || !q.trim() ? (
-          <div className="p-4 rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl text-center text-sm text-slate-200/90">
+          <div className="theme-banner p-4 text-center text-sm">
             Enter a <strong>set name</strong> and an <strong>exact hex</strong> to find complete sets owned by the same player.
             <div className="mt-1 opacity-80">Dragon sets return <em>Chestplate + Leggings + Boots</em>. Others (e.g. Farm Suit) return all four pieces.</div>
           </div>
         ) : null}
 
-        {err && <div className="p-3 mb-4 rounded-2xl bg-red-400/10 ring-1 ring-red-400/30 text-red-100">{err}</div>}
+        {err && <div className="theme-error p-3 mb-4">{err}</div>}
 
         {/* Results */}
         {!err && items.length > 0 && (
@@ -505,7 +498,7 @@ export default function SetsPage() {
                 const displayHex = computeSetDisplayHex(it) || normHex(it.color) || "#888888";
                 const isFav = favKeys.has(favKey);
                 return (
-                  <div key={idx} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
+                  <div key={idx} className="theme-card p-4">
                     <div className="flex items-start gap-4">
                       {/* swatch */}
                       <div className="flex flex-col items-center gap-1">
@@ -543,28 +536,28 @@ export default function SetsPage() {
                         {/* piece metadata */}
                         <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                           {it.pieces.chestplate && (
-                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="theme-piece p-2">
                               <div className="text-xs opacity-80">Chestplate</div>
                               <div className="font-medium truncate">{it.pieces.chestplate.name}</div>
                               <code className="text-[11px] opacity-90">{normHex(it.pieces.chestplate.color)}</code>
                             </div>
                           )}
                           {it.pieces.leggings && (
-                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="theme-piece p-2">
                               <div className="text-xs opacity-80">Leggings</div>
                               <div className="font-medium truncate">{it.pieces.leggings.name}</div>
                               <code className="text-[11px] opacity-90">{normHex(it.pieces.leggings.color)}</code>
                             </div>
                           )}
                           {it.pieces.boots && (
-                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="theme-piece p-2">
                               <div className="text-xs opacity-80">Boots</div>
                               <div className="font-medium truncate">{it.pieces.boots.name}</div>
                               <code className="text-[11px] opacity-90">{normHex(it.pieces.boots.color)}</code>
                             </div>
                           )}
                           {it.pieces.helmet && (
-                            <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                            <div className="theme-piece p-2">
                               <div className="text-xs opacity-80">Helmet</div>
                               <div className="font-medium truncate">{it.pieces.helmet.name}</div>
                               <code className="text-[11px] opacity-90">{normHex(it.pieces.helmet.color)}</code>
@@ -591,10 +584,10 @@ export default function SetsPage() {
 
             {/* pagination */}
             {totalPages > 1 && (
-              <div className="mt-8 flex items-center justify-center gap-3">
-                <button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))} className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md">Prev</button>
+              <div className="theme-pagination mt-8 flex items-center justify-center gap-3">
+                <button disabled={page<=1} onClick={()=>setPage(p=>Math.max(1,p-1))} className="theme-button px-4 py-2">Prev</button>
                 <span className="text-sm text-slate-200/90">Page {page} / {totalPages} • {total} sets</span>
-                <button disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))} className="px-4 py-2 rounded-2xl bg-white/10 ring-1 ring-white/10 hover:bg-white/15 disabled:opacity-40 backdrop-blur-md">Next</button>
+                <button disabled={page>=totalPages} onClick={()=>setPage(p=>Math.min(totalPages,p+1))} className="theme-button px-4 py-2">Next</button>
               </div>
             )}
           </>

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import SiteChrome from "../components/SiteChrome";
 
 /* =========================================
    Types (matches what you store in LS)
@@ -372,21 +373,15 @@ export default function FavouritesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-cyan-900 via-cyan-900 to-cyan-950 text-slate-100">
-      <header className="py-10 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight drop-shadow" style={{ fontFamily: '"Exo 2", system-ui, sans-serif' }}>
-          Gibbo&apos;s Exo&apos;s — Favourites
-        </h1>
-        <div className="mt-4 flex gap-3 justify-center">
-          <Link href="/" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">All Items</Link>
-          <Link href="/sets" className="px-4 py-2 rounded-full bg-white/5 ring-1 ring-white/10 hover:bg-white/10 backdrop-blur-md transition">Sets</Link>
-          <span className="px-4 py-2 rounded-full bg-white/10 ring-1 ring-white/10 backdrop-blur-md shadow">Favourites</span>
-        </div>
-      </header>
+    <div className="site-shell">
+      <SiteChrome
+        title="Gibbo's Exotics — Favourites"
+        subtitle="Keep your saved exotic sets together in the same clean collection view."
+      />
 
-      <main className="max-w-6xl mx-auto px-4 pb-16">
+      <main className="content-wrap page-content">
         {items.length === 0 ? (
-          <div className="p-4 rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl text-center text-sm text-slate-200/90">
+          <div className="theme-banner p-8 text-center text-sm">
             No favourites yet. Go to the <Link className="underline" href="/sets">Sets</Link> tab and click ★ to add some.
           </div>
         ) : (
@@ -396,7 +391,7 @@ export default function FavouritesPage() {
               const displayHex = computeSetDisplayHex(s) || normHex(s.color) || "#888888";
 
               return (
-                <div key={favKey} className="rounded-2xl bg-white/8 ring-1 ring-white/10 backdrop-blur-xl p-4 shadow-lg">
+                <div key={favKey} className="theme-card p-4">
                   <div className="flex items-start gap-4">
                     {/* swatch */}
                     <div className="flex flex-col items-center gap-1">
@@ -433,28 +428,28 @@ export default function FavouritesPage() {
                       {/* piece metadata */}
                       <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
                         {s.pieces.chestplate && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                          <div className="theme-piece p-2">
                             <div className="text-xs opacity-80">Chestplate</div>
                             <div className="font-medium truncate">{s.pieces.chestplate.name}</div>
                             <code className="text-[11px] opacity-90">{normHex(s.pieces.chestplate.color)}</code>
                           </div>
                         )}
                         {s.pieces.leggings && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                          <div className="theme-piece p-2">
                             <div className="text-xs opacity-80">Leggings</div>
                             <div className="font-medium truncate">{s.pieces.leggings.name}</div>
                             <code className="text-[11px] opacity-90">{normHex(s.pieces.leggings.color)}</code>
                           </div>
                         )}
                         {s.pieces.boots && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                          <div className="theme-piece p-2">
                             <div className="text-xs opacity-80">Boots</div>
                             <div className="font-medium truncate">{s.pieces.boots.name}</div>
                             <code className="text-[11px] opacity-90">{normHex(s.pieces.boots.color)}</code>
                           </div>
                         )}
                         {s.pieces.helmet && (
-                          <div className="rounded-xl bg-white/10 ring-1 ring-white/15 p-2">
+                          <div className="theme-piece p-2">
                             <div className="text-xs opacity-80">Helmet</div>
                             <div className="font-medium truncate">{s.pieces.helmet.name}</div>
                             <code className="text-[11px] opacity-90">{normHex(s.pieces.helmet.color)}</code>
