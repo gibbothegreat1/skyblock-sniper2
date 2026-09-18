@@ -15,7 +15,9 @@
     "better-sqlite3": "^9.4.0",
     "next": "^14.2.5",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "@sparticuz/chromium": "^131.0.1",
+    "puppeteer-core": "^23.10.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.9",

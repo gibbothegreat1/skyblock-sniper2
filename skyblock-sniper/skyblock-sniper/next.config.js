@@ -1,15 +1,17 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ["better-sqlite3"],
-    // ⬇️ Ensure the SQLite file is bundled into EVERY app/api/** lambda
+    serverComponentsExternalPackages: ["better-sqlite3", "@sparticuz/chromium", "puppeteer-core"],
     outputFileTracingIncludes: {
       "app/api/**": [
         "./data/skyblock.db",
-        "./data/**/*",        // include the whole folder just in case
+        "./data/**/*",
+      ],
+      "app/api/check-exotico/**": [
+        "./node_modules/@sparticuz/chromium/bin/**/*",
       ],
     },
   },
 };
 
-export default nextConfig; // (or module.exports = nextConfig for .cjs)
+export default nextConfig;
