@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../lib/db";
+import { getDb } from "../../../lib/db";
 import {
   CRYSTAL_HEXES,
   FAIRY_HEXES,
@@ -62,6 +62,7 @@ async function resolveUsername(uuidMaybeDashed?: string | null): Promise<string 
 
   try {
     if (CAN_WRITE) {
+      const db = getDb();
       const cached = db
         .prepare(`SELECT username, fetched_at FROM username_cache WHERE uuid = ?`)
         .get(uuid) as { username?: string | null; fetched_at?: number } | undefined;
@@ -115,6 +116,7 @@ function addNonExoticFilters(
 
 export async function GET(req: Request) {
   try {
+    const db = getDb();
     const { searchParams } = new URL(req.url);
     const qRaw = (searchParams.get("q") || "").trim();
     const colorRaw = (searchParams.get("color") || "").trim();

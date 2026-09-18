@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../lib/db";
+import { getDb } from "../../../lib/db";
 import { deltaE2000 } from "../../../lib/colorDistance";
 import { getNonExoticHexType } from "../../../lib/nonExoticHexes";
 
@@ -64,6 +64,7 @@ async function resolveUsername(uuidMaybeDashed?: string | null): Promise<string 
 
   try {
     if (CAN_WRITE) {
+      const db = getDb();
       db.exec(`
         CREATE TABLE IF NOT EXISTS username_cache(
           uuid TEXT PRIMARY KEY,
@@ -104,6 +105,7 @@ async function resolveUsername(uuidMaybeDashed?: string | null): Promise<string 
 /* ----------------- handler ----------------- */
 export async function GET(req: Request) {
   try {
+    const db = getDb();
     const { searchParams } = new URL(req.url);
     const qRaw       = (searchParams.get("q") || "").trim();          // set keywords
     const color      = (searchParams.get("color") || "").trim();      // target hex

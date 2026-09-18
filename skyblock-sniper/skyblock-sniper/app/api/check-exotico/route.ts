@@ -1,38 +1,99 @@
 import { NextResponse } from "next/server";
-import { normalizeColorHex } from "../../../lib/colorDistance";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 30;
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-type Target = { uuid?: string | null; name?: string | null; color?: string | null };
+type Target = {
+  uuid?: string | null;
+  name?: string | null;
+  color?: string | null;
+};
+
+type ExoticoItem = {
+  id?: string | null;
+  name?: string | null;
+  color?: string | null;
+  variant?: string | null;
+  profile?: string | null;
+  profileName?: string | null;
+  location?: string | null;
+  armorType?: string | null;
+  category?: string | null;
+};
+
+type ExoticoProfile = {
+  name?: string | null;
+  exoticItems?: ExoticoItem[] | null;
+};
+
+type ExoticoResponse = {
+  profiles?: ExoticoProfile[] | null;
+  items?: Array<Record<string, unknown>> | null;
+  cached?: boolean;
+  fetchTime?: number;
+  timestamp?: number;
+};
 
 const REFORGES = new Set([
-  "ancient","bizarre","clean","fierce","forceful","godly","heavy","hurtful","light","loving","mythic",
-  "necrotic","pleasant","pure","reinforced","renowned","ridiculous","smart","spiked","strong","superior",
-  "titanic","unpleasant","very","wise","zealous"
+  "ancient", "bizarre", "clean", "fierce", "forceful", "godly", "heavy", "hurtful", "light",
+  "loving", "mythic", "necrotic", "pleasant", "pure", "reinforced", "renowned", "ridiculous",
+  "smart", "spiked", "strong", "superior", "titanic", "unpleasant", "very", "wise", "zealous",
 ]);
 
-function canonicalNameCandidates(input?: string | null) {
-  const words = String(input || "")
-    .replace(/§[0-9a-fk-or]/gi, "")
-    .replace(/[_-]+/g, " ")
-    .replace(/[^a-zA-Z0-9 ]+/g, " ")
-    .toLowerCase().split(/\s+/).filter(Boolean);
-  const candidates = new Set<string>();
-  if (words.length) candidates.add(words.join(" "));
-  if (words.length > 2 && REFORGES.has(words[0])) candidates.add(words.slice(1).join(" "));
-  if (words.length > 3 && words[0] === "very" && words[1] === "wise") candidates.add(words.slice(2).join(" "));
-  return Array.from(candidates).sort((a, b) => b.length - a.length);
+const ITEM_ID_ALIASES: Record<string, string[]> = {
+  STEREO_PANTS: ["MUSIC_PANTS"],
+  MUSIC_PANTS: ["STEREO_PANTS"],
+  LEAFLET_BOOTS: ["LEAFLET_SANDALS"],
+  LEAFLET_CHESTPLATE: ["LEAFLET_TUNIC"],
+  LEAFLET_LEGGINGS: ["LEAFLET_PANTS"],
+};
+
+function normalizeHex(input?: string | null): string | null {
+  if (!input) return null;
+  const s = String(input).trim().replace(/^#/, "").toUpperCase();
+  return /^[0-9A-F]{6}$/.test(s) ? s : null;
 }
 
-function compactText(s: string) {
-  return s
-    .replace(/§[0-9a-fk-or]/gi, "")
-    .replace(/\u00a0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+function stripFormatting(input: string) {
+  return input.replace(/§[0-9A-FK-OR]/gi, "").trim();
+}
+
+function wordsToItemId(words: string[]) {
+  return words
+    .join(" ")
+    .replace(/[’']/g, "")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_")
+    .toUpperCase();
+}
+
+function targetItemIdCandidates(input?: string | null): string[] {
+  if (!input) return [];
+
+  const originalWords = stripFormatting(String(input))
+    .replace(/[_-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const candidates = new Set<string>();
+  const add = (words: string[]) => {
+    if (!words.length) return;
+    const id = wordsToItemId(words);
+    if (!id) return;
+    candidates.add(id);
+    for (const alias of ITEM_ID_ALIASES[id] || []) candidates.add(alias);
+  };
+
+  add(originalWords);
+
+  const lower = originalWords.map((w) => w.toLowerCase());
+  if (lower.length > 1 && REFORGES.has(lower[0])) add(originalWords.slice(1));
+  if (lower.length > 2 && lower[0] === "very" && lower[1] === "wise") add(originalWords.slice(2));
+
+  return Array.from(candidates);
 }
 
 async function resolveIgn(ownerUuid?: string | null) {
@@ -44,176 +105,158 @@ async function resolveIgn(ownerUuid?: string | null) {
       signal: AbortSignal.timeout(5000),
     });
     if (!r.ok) return null;
-    const j = await r.json() as { username?: string; name?: string };
+    const j = (await r.json()) as { username?: string; name?: string };
     return j.username || j.name || null;
-  } catch { return null; }
-}
-
-function targetFound(renderedText: string, target: Target) {
-  const text = compactText(renderedText);
-  const hex = normalizeColorHex(target.color || null)?.toLowerCase() || null;
-  const names = canonicalNameCandidates(target.name);
-
-  if (!names.length) return false;
-
-  for (const name of names) {
-    let from = 0;
-    while (true) {
-      const idx = text.indexOf(name, from);
-      if (idx < 0) break;
-      if (!hex) return true;
-      // One Exotico item card is far smaller than this. Keeping the window
-      // local prevents a hex from a different item on the page causing a hit.
-      const start = Math.max(0, idx - 450);
-      const end = Math.min(text.length, idx + name.length + 700);
-      const window = text.slice(start, end);
-      if (window.includes(hex)) return true;
-      from = idx + name.length;
-    }
+  } catch {
+    return null;
   }
-  return false;
 }
 
-type Snapshot = { text: string; url: string; title: string; loadedAt: number };
-const globalCache = globalThis as typeof globalThis & { __exoticoSnapshots?: Map<string, Snapshot> };
-const snapshotCache = globalCache.__exoticoSnapshots || new Map<string, Snapshot>();
-globalCache.__exoticoSnapshots = snapshotCache;
+type CachedApi = { data: ExoticoResponse; loadedAt: number };
+const globalCache = globalThis as typeof globalThis & {
+  __exoticoApiCache?: Map<string, CachedApi>;
+};
+const apiCache = globalCache.__exoticoApiCache || new Map<string, CachedApi>();
+globalCache.__exoticoApiCache = apiCache;
 const CACHE_MS = 60_000;
 
-async function renderedExoticoPage(ign: string): Promise<Snapshot> {
+async function fetchExotico(ign: string): Promise<ExoticoResponse> {
   const key = ign.toLowerCase();
-  const cached = snapshotCache.get(key);
-  if (cached && Date.now() - cached.loadedAt < CACHE_MS) return cached;
+  const cached = apiCache.get(key);
+  if (cached && Date.now() - cached.loadedAt < CACHE_MS) return cached.data;
 
-  const chromiumMod = await import("@sparticuz/chromium");
-  const puppeteerMod = await import("puppeteer-core");
-  const chromium = chromiumMod.default;
-  const puppeteer = puppeteerMod.default;
+  const token = (process.env.EXOTICO_LOAD_TOKEN || "").trim();
+  const headers: Record<string, string> = {
+    accept: "application/json, text/plain, */*",
+    referer: `https://exotico.flori.tv/?player=${encodeURIComponent(ign)}`,
+    "user-agent": "Mozilla/5.0 (compatible; SkyblockSniper/1.0)",
+  };
+  if (token) headers["x-load-token"] = token;
 
-  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | null = null;
-  try {
-    browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-      ],
-      defaultViewport: { width: 1600, height: 1100 },
-      executablePath: await chromium.executablePath(),
-      headless: true,
-    });
+  const url = `https://exotico.flori.tv/api/exotic-items?playername=${encodeURIComponent(ign)}&limit=10000`;
+  const response = await fetch(url, {
+    method: "GET",
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
 
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    );
-    await page.setExtraHTTPHeaders({
-      "accept-language": "en-US,en;q=0.9",
-    });
-
-    const url = `https://exotico.flori.tv/?player=${encodeURIComponent(ign)}`;
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 25_000 });
-
-    // Exotico is client-rendered. The previous checker fetched raw HTML only,
-    // so it never saw the exotic cards. Here we wait for the browser-rendered UI.
-    await page.waitForFunction(() => {
-      const t = document.body?.innerText || "";
-      return /\bExotics\b/i.test(t) || /API\s*(error|off|down)/i.test(t);
-    }, { timeout: 12_000 }).catch(() => undefined);
-
-    // If the player page did not land on Exotics, click its Exotics tab.
-    await page.evaluate(() => {
-      const nodes = Array.from(document.querySelectorAll("a,button,[role='tab']"));
-      const hit = nodes.find((el) => (el.textContent || "").trim().toLowerCase() === "exotics");
-      if (hit instanceof HTMLElement) hit.click();
-    }).catch(() => undefined);
-
-    await new Promise((resolve) => setTimeout(resolve, 2500));
-
-    // Wait a little longer when the page is clearly loading a player collection.
-    await page.waitForFunction(() => {
-      const t = document.body?.innerText || "";
-      return /\b\d+\s+items?\b/i.test(t)
-        || /no\s+(exotics|items)/i.test(t)
-        || /API\s*(error|off|down)/i.test(t)
-        || /player\s+not\s+found/i.test(t);
-    }, { timeout: 10_000 }).catch(() => undefined);
-
-    const result = await page.evaluate(() => ({
-      text: document.body?.innerText || "",
-      url: location.href,
-      title: document.title || "",
-    }));
-
-    const snap: Snapshot = { ...result, loadedAt: Date.now() };
-    snapshotCache.set(key, snap);
-    return snap;
-  } finally {
-    if (browser) await browser.close().catch(() => undefined);
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    const snippet = body.replace(/\s+/g, " ").slice(0, 180);
+    const err = new Error(`Exotico API returned HTTP ${response.status}${snippet ? `: ${snippet}` : ""}`);
+    (err as Error & { status?: number }).status = response.status;
+    throw err;
   }
+
+  const data = (await response.json()) as ExoticoResponse;
+  if (!data || !Array.isArray(data.profiles)) {
+    throw new Error("Exotico returned an unexpected response shape.");
+  }
+
+  apiCache.set(key, { data, loadedAt: Date.now() });
+  return data;
+}
+
+function allExoticItems(data: ExoticoResponse): ExoticoItem[] {
+  const out: ExoticoItem[] = [];
+  for (const profile of data.profiles || []) {
+    for (const item of profile.exoticItems || []) {
+      if (item && typeof item === "object") out.push(item);
+    }
+  }
+  return out;
+}
+
+function matchTarget(items: ExoticoItem[], target: Target) {
+  const targetColor = normalizeHex(target.color);
+  const ids = targetItemIdCandidates(target.name);
+  if (!targetColor || ids.length === 0) return null;
+
+  const found = items.find((item) => {
+    const itemId = String(item.name || "").trim().toUpperCase();
+    const itemColor = normalizeHex(item.color);
+    return ids.includes(itemId) && itemColor === targetColor;
+  });
+
+  return found || null;
 }
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json() as { ign?: string | null; ownerUuid?: string | null; targets?: Target[] };
-    const targets = Array.isArray(body.targets) ? body.targets.filter((t) => t?.name) : [];
+    const body = (await req.json()) as {
+      ign?: string | null;
+      ownerUuid?: string | null;
+      targets?: Target[];
+    };
+
+    const targets = Array.isArray(body.targets)
+      ? body.targets.filter((t) => t?.name && normalizeHex(t?.color))
+      : [];
+
     if (!targets.length) {
-      return NextResponse.json({ status: "api_off", detail: "No armour target supplied." }, { status: 400 });
+      return NextResponse.json(
+        { status: "api_off", detail: "No valid armour target and hex were supplied." },
+        { status: 400 }
+      );
     }
 
-    const ign = (body.ign || "").trim() || await resolveIgn(body.ownerUuid);
-    if (!ign) return NextResponse.json({ status: "api_off", detail: "Could not resolve the player's IGN." });
+    const ign = (body.ign || "").trim() || (await resolveIgn(body.ownerUuid));
+    if (!ign) {
+      return NextResponse.json({
+        status: "api_off",
+        detail: "Could not resolve the player's IGN.",
+      });
+    }
 
-    let snapshot: Snapshot;
+    let data: ExoticoResponse;
     try {
-      snapshot = await renderedExoticoPage(ign);
+      data = await fetchExotico(ign);
     } catch (err) {
-      console.error("Exotico browser check failed", err);
+      console.error("Exotico API check failed", err);
+      const message = err instanceof Error ? err.message : "Unknown Exotico API error";
+      const status = (err as Error & { status?: number })?.status;
+
+      if ((status === 401 || status === 403) && !process.env.EXOTICO_LOAD_TOKEN) {
+        return NextResponse.json({
+          status: "api_off",
+          detail: "Exotico requires its load token. Add EXOTICO_LOAD_TOKEN in Vercel Environment Variables, then redeploy.",
+        });
+      }
+
+      if (status === 401 || status === 403) {
+        return NextResponse.json({
+          status: "api_off",
+          detail: "Exotico rejected the configured load token. Refresh Exotico in your browser, copy the current x-load-token value, update EXOTICO_LOAD_TOKEN in Vercel, and redeploy.",
+        });
+      }
+
       return NextResponse.json({
         status: "api_off",
-        detail: "Could not render Exotico on the server. Use Open Exotico to check manually.",
+        detail: `Exotico API could not be read (${message}).`,
       });
     }
 
-    const text = snapshot.text;
-    const plain = compactText(text);
-
-    if (!plain || plain.length < 80) {
-      return NextResponse.json({ status: "api_off", detail: "Exotico returned an empty page. Check manually." });
-    }
-
-    if (/api\s*(is\s*)?(off|down|error)|failed\s+to\s+fetch|internal\s+server\s+error|application\s+error/.test(plain)) {
-      return NextResponse.json({ status: "api_off", detail: "Exotico/API appears unavailable. Check manually." });
-    }
-
-    if (/player\s+not\s+found|unknown\s+player/.test(plain)) {
-      return NextResponse.json({ status: "api_off", detail: `${ign} could not be loaded on Exotico.` });
-    }
-
-    // A valid rendered player page should expose the Exotics tab plus either an
-    // item count, exotic item names, or an explicit empty state.
-    const looksLikePlayerPage = /\bexotics\b/.test(plain) && (
-      /\b\d+\s+items?\b/.test(plain)
-      || /(helmet|chestplate|leggings|boots)/.test(plain)
-      || /no\s+(exotics|items)/.test(plain)
-    );
-    if (!looksLikePlayerPage) {
-      return NextResponse.json({
-        status: "api_off",
-        detail: "Exotico opened, but the player's Exotics tab did not finish loading. Check manually.",
-      });
-    }
-
-    const matches = targets.map((t) => targetFound(text, t));
+    const items = allExoticItems(data);
+    const matchedItems = targets.map((target) => matchTarget(items, target));
+    const matches = matchedItems.map(Boolean);
     const allFound = matches.every(Boolean);
 
     if (allFound) {
       return NextResponse.json({
         status: "still_has",
-        detail: `${ign}: ${targets.length === 1 ? "matching piece is" : "all matching pieces are"} still visible in Exotico.`,
+        detail: `${ign}: ${targets.length === 1 ? "matching piece is" : "all matching pieces are"} still on Exotico.`,
         matches,
+        matchedItems: matchedItems.map((item) => item
+          ? {
+              id: item.id || null,
+              name: item.name || null,
+              color: item.color || null,
+              variant: item.variant || null,
+              profile: item.profileName || item.profile || null,
+              location: item.location || null,
+            }
+          : null),
       });
     }
 
@@ -221,9 +264,20 @@ export async function POST(req: Request) {
       status: "missing",
       detail: `${ign}: ${matches.filter(Boolean).length}/${matches.length} requested pieces matched on Exotico.`,
       matches,
+      missing: targets
+        .map((target, i) => ({ target, found: matches[i] }))
+        .filter((x) => !x.found)
+        .map((x) => ({
+          name: x.target.name || null,
+          color: normalizeHex(x.target.color),
+          itemIdCandidates: targetItemIdCandidates(x.target.name),
+        })),
     });
   } catch (err) {
     console.error("check-exotico route failed", err);
-    return NextResponse.json({ status: "api_off", detail: "Checker failed. Check Exotico manually." });
+    return NextResponse.json({
+      status: "api_off",
+      detail: "Checker failed before the Exotico comparison completed.",
+    });
   }
 }

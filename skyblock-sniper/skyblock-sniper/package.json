@@ -9,7 +9,7 @@
     "import": "node scripts/import.js",
     "import:ha3l": "node scripts/import-ha3l.js",
     "prepare-db": "node scripts/prepare-db.js",
-    "vercel-build": "node scripts/prepare-db.js && next build"
+    "vercel-build": "next build"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.0",
