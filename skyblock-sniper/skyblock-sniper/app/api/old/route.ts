@@ -4,6 +4,10 @@ import path from "node:path";
 import { deltaE2000 } from "../../../lib/colorDistance";
 import { getNonExoticHexType } from "../../../lib/nonExoticHexes";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 /* ---------- Types ---------- */
 type RawRow = Record<string, string>;
 

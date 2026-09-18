@@ -9,6 +9,8 @@ import {
 import { deltaE2000 } from "../../../lib/colorDistance";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const maxDuration = 60;
 
 const IS_PROD = process.env.NODE_ENV === "production";

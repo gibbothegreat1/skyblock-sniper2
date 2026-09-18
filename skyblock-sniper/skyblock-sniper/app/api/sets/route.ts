@@ -4,6 +4,8 @@ import { deltaE2000 } from "../../../lib/colorDistance";
 import { getNonExoticHexType } from "../../../lib/nonExoticHexes";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const IS_PROD = process.env.NODE_ENV === "production";
 const IS_VERCEL = !!process.env.VERCEL;
